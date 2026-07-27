@@ -124,33 +124,27 @@ Example request:
 
 ```bash
 curl -X POST "http://127.0.0.1:8011/generate-v1" \
-  -F "image=@/absolute/path/to/input.png" \
+  -F "image=@/absolute/path/to/input.png"
+```
+
+Download bundle ZIP with `metadata.json + STL`:
+
+```bash
+curl -L "http://127.0.0.1:8011/downloads/<job-id>/bundle" \
   --output modelo_bundle.zip
 ```
 
-Full ZIP with STL + OBJ + GLB + metadata + processed image:
+Download full ZIP with `metadata.json + STL + OBJ + GLB + processed image`:
 
 ```bash
-curl -X POST "http://127.0.0.1:8011/generate-v1" \
-  -F "image=@/absolute/path/to/input.png" \
-  -F "download_mode=all" \
+curl -L "http://127.0.0.1:8011/downloads/<job-id>/all" \
   --output modelo_all.zip
 ```
 
-JSON response only:
+Direct STL download:
 
 ```bash
-curl -X POST "http://127.0.0.1:8011/generate-v1" \
-  -F "image=@/absolute/path/to/input.png" \
-  -F "download_mode=json"
-```
-
-Legacy direct STL download:
-
-```bash
-curl -X POST "http://127.0.0.1:8011/generate-v1" \
-  -F "image=@/absolute/path/to/input.png" \
-  -F "download_stl=true" \
+curl -L "http://127.0.0.1:8011/artifacts/<job-id>/STL/<file>.stl" \
   --output modelo.stl
 ```
 
@@ -169,6 +163,10 @@ Expected response shape:
     "obj": "/artifacts/<job-id>/OBJ/<file>.obj",
     "glb": "/artifacts/<job-id>/GLB/<file>.glb",
     "processed_image": "/artifacts/<job-id>/processed_image/imagen_procesada.png"
+  },
+  "bundle_urls": {
+    "bundle": "/downloads/<job-id>/bundle",
+    "all": "/downloads/<job-id>/all"
   }
 }
 ```

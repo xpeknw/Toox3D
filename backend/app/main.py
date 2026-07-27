@@ -25,8 +25,6 @@ async def generate_v1(
     guidance_scale: float = Form(5.5),
     seed: int = Form(1234),
     remove_background: bool = Form(True),
-    download_mode: str = Form("bundle"),
-    download_stl: bool = Form(False),
 ):
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
@@ -34,13 +32,6 @@ async def generate_v1(
     content = await image.read()
     if not content:
         raise HTTPException(status_code=400, detail="Image file is empty.")
-
-    normalized_mode = download_mode.strip().lower()
-    if normalized_mode not in {"bundle", "all", "json"}:
-        raise HTTPException(
-            status_code=400,
-            detail="download_mode must be one of: bundle, all, json.",
-        )
 
     try:
         result = hunyuan_v1_service.generate(
@@ -52,39 +43,44 @@ async def generate_v1(
             seed=seed,
             remove_background=remove_background,
         )
-
-        if download_stl:
-            stl_export = result["exports"].get("stl")
-            if not stl_export or not stl_export.get("ok"):
-                raise HTTPException(
-                    status_code=500,
-                    detail="STL export was not generated successfully.",
-                )
-
-            return FileResponse(
-                path=stl_export["path"],
-                filename=Path(stl_export["path"]).name,
-                media_type="model/stl",
-            )
-
-        if normalized_mode == "json":
-            return result
-
-        bundle_path = hunyuan_v1_service.build_download_bundle(
-            result,
-            include_all=normalized_mode == "all",
-        )
-        return FileResponse(
-            path=bundle_path,
-            filename=bundle_path.name,
-            media_type="application/zip",
-        )
+        job_id = result["job_id"]
+        result["bundle_urls"] = {
+            "bundle": f"/downloads/{job_id}/bundle",
+            "all": f"/downloads/{job_id}/all",
+        }
+        return result
     except Exception as exc:
         if isinstance(exc, CudaUnavailableError):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         if isinstance(exc, HTTPException):
             raise exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/downloads/{job_id}/{bundle_kind}")
+def download_bundle(job_id: str, bundle_kind: str) -> FileResponse:
+    normalized_kind = bundle_kind.strip().lower()
+    if normalized_kind not in {"bundle", "all"}:
+        raise HTTPException(
+            status_code=400,
+            detail="bundle_kind must be one of: bundle, all.",
+        )
+
+    try:
+        bundle_path = hunyuan_v1_service.build_download_bundle_for_job(
+            job_id=job_id,
+            include_all=normalized_kind == "all",
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=bundle_path,
+        filename=bundle_path.name,
+        media_type="application/zip",
+    )
 
 
 @app.get("/artifacts/{job_id}/{artifact_path:path}")

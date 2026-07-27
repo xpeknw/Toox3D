@@ -187,6 +187,37 @@ class HunyuanV1Service:
 
         return zip_path
 
+    def build_download_bundle_for_job(
+        self,
+        job_id: str,
+        *,
+        include_all: bool,
+    ) -> Path:
+        job_dir = (self.outputs_root / job_id).resolve()
+        if not job_dir.exists() or not job_dir.is_dir():
+            raise FileNotFoundError("Job output directory not found.")
+
+        if not str(job_dir).startswith(str(self.outputs_root.resolve())):
+            raise ValueError("Job path escapes outputs directory.")
+
+        metadata_path = job_dir / "metadata.json"
+        if not metadata_path.exists() or not metadata_path.is_file():
+            raise FileNotFoundError("Job metadata was not found.")
+
+        with open(metadata_path, "r", encoding="utf-8") as handle:
+            generation_result = json.load(handle)
+
+        generation_result["job_id"] = job_id
+        generation_result["metadata_path"] = str(metadata_path)
+        generation_result.setdefault(
+            "processed_image",
+            str(job_dir / "processed_image" / "imagen_procesada.png"),
+        )
+        return self.build_download_bundle(
+            generation_result,
+            include_all=include_all,
+        )
+
     def _resolve_path(self, configured_path: str) -> Path:
         raw_path = Path(configured_path)
         if raw_path.is_absolute():
