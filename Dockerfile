@@ -21,4 +21,4 @@ COPY backend ./backend
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-lc", "uv run uvicorn backend.app.main:app --host 0.0.0.0 --port ${TOOX_PORT:-8011}"]

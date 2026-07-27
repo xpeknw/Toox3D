@@ -37,6 +37,15 @@ The first server boot may take several minutes because it may need to:
 - resolve Python dependencies
 - build the Docker image
 
+During `bootstrap.sh`, the script can ask for:
+
+- the FastAPI port on the server
+- the local port you want to use on your Mac
+- the Vast.ai SSH port
+- the server public IP or hostname
+
+Those values are stored in `.env` and reused later.
+
 ## Local development
 
 Requirements:
@@ -107,11 +116,24 @@ docker compose up --build
 Suggested verification sequence on the VM:
 
 ```bash
-uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
-curl http://127.0.0.1:8000/health
+export PATH="$HOME/.local/bin:$PATH"
+uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8011 --reload
+curl http://127.0.0.1:8011/health
 docker compose up --build
-curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8011/health
 docker compose ps
+```
+
+Example SSH tunnel from your Mac after bootstrap is configured:
+
+```bash
+ssh -p 32145 root@123.123.123.123 -L 8011:localhost:8011
+```
+
+Example from a real Vast.ai test:
+
+```bash
+ssh -p 27608 root@151.237.25.234 -L 8011:localhost:8011
 ```
 
 ## Notes

@@ -3,6 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPECTED_UBUNTU_VERSION="22.04"
+TOOX_ENV_FILE="$PROJECT_ROOT/.env"
 
 log() {
   printf '\n[%s] %s\n' "toox3d" "$1"
@@ -123,18 +124,88 @@ check_docker() {
 }
 
 ensure_env_file() {
-  if [[ -f "$PROJECT_ROOT/.env" ]]; then
+  if [[ -f "$TOOX_ENV_FILE" ]]; then
     log ".env already exists"
     return
   fi
 
   log "Creating .env from .env.example"
-  cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
+  cp "$PROJECT_ROOT/.env.example" "$TOOX_ENV_FILE"
 }
 
 ensure_directories() {
   log "Creating local directories"
   mkdir -p "$PROJECT_ROOT/models" "$PROJECT_ROOT/outputs" "$PROJECT_ROOT/scripts"
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+
+  if grep -q "^${key}=" "$TOOX_ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$TOOX_ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$TOOX_ENV_FILE"
+  fi
+}
+
+get_env_value() {
+  local key="$1"
+  local fallback="$2"
+  local value
+
+  value="$(grep -E "^${key}=" "$TOOX_ENV_FILE" | tail -n 1 | cut -d '=' -f2- || true)"
+  if [[ -z "$value" ]]; then
+    printf '%s' "$fallback"
+  else
+    printf '%s' "$value"
+  fi
+}
+
+prompt_value() {
+  local prompt_text="$1"
+  local default_value="$2"
+  local user_value=""
+
+  if [[ ! -t 0 ]]; then
+    printf '%s' "$default_value"
+    return
+  fi
+
+  read -r -p "$prompt_text [$default_value]: " user_value
+  if [[ -z "$user_value" ]]; then
+    printf '%s' "$default_value"
+  else
+    printf '%s' "$user_value"
+  fi
+}
+
+configure_runtime_values() {
+  local current_port current_local_port current_ssh_port current_ssh_host
+  local toox_port local_tunnel_port ssh_port ssh_host
+
+  current_port="$(get_env_value "TOOX_PORT" "8011")"
+  current_local_port="$(get_env_value "TOOX_LOCAL_TUNNEL_PORT" "$current_port")"
+  current_ssh_port="$(get_env_value "TOOX_SSH_PORT" "")"
+  current_ssh_host="$(get_env_value "TOOX_SSH_HOST" "")"
+
+  if [[ -t 0 ]]; then
+    log "Configure server and tunnel values"
+    toox_port="$(prompt_value "FastAPI port on the server" "$current_port")"
+    local_tunnel_port="$(prompt_value "Local port on your Mac for the SSH tunnel" "$current_local_port")"
+    ssh_port="$(prompt_value "Vast.ai SSH port (leave blank if not needed now)" "$current_ssh_port")"
+    ssh_host="$(prompt_value "Vast.ai public IP or hostname (leave blank if not needed now)" "$current_ssh_host")"
+  else
+    toox_port="$current_port"
+    local_tunnel_port="$current_local_port"
+    ssh_port="$current_ssh_port"
+    ssh_host="$current_ssh_host"
+  fi
+
+  set_env_value "TOOX_PORT" "$toox_port"
+  set_env_value "TOOX_LOCAL_TUNNEL_PORT" "$local_tunnel_port"
+  set_env_value "TOOX_SSH_PORT" "$ssh_port"
+  set_env_value "TOOX_SSH_HOST" "$ssh_host"
 }
 
 sync_dependencies() {
@@ -144,15 +215,33 @@ sync_dependencies() {
 }
 
 print_next_steps() {
-  cat <<'EOF'
+  local toox_port local_tunnel_port ssh_port ssh_host
+  toox_port="$(get_env_value "TOOX_PORT" "8011")"
+  local_tunnel_port="$(get_env_value "TOOX_LOCAL_TUNNEL_PORT" "$toox_port")"
+  ssh_port="$(get_env_value "TOOX_SSH_PORT" "")"
+  ssh_host="$(get_env_value "TOOX_SSH_HOST" "")"
+
+  cat <<EOF
 
 Next steps:
-  uv run uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+  export PATH="\$HOME/.local/bin:\$PATH"
+  uv run uvicorn backend.app.main:app --host 0.0.0.0 --port ${toox_port} --reload
   docker compose up --build
 
 Health check:
-  curl http://127.0.0.1:8000/health
+  curl http://127.0.0.1:${toox_port}/health
 EOF
+
+  if [[ -n "$ssh_port" && -n "$ssh_host" ]]; then
+    cat <<EOF
+
+SSH tunnel from your Mac:
+  ssh -p ${ssh_port} root@${ssh_host} -L ${local_tunnel_port}:localhost:${toox_port}
+
+Open in your Mac browser:
+  http://127.0.0.1:${local_tunnel_port}/docs
+EOF
+  fi
 }
 
 main() {
@@ -167,6 +256,7 @@ main() {
   check_nvidia
   ensure_env_file
   ensure_directories
+  configure_runtime_values
   sync_dependencies
   print_next_steps
 }

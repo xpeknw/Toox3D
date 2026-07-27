@@ -113,6 +113,21 @@ tokens.
 If the repository becomes private later, repository authentication must be
 handled as a separate step before running bootstrap.sh.
 
+For Vast.ai development, bootstrap.sh may ask for connectivity values such as:
+
+- the FastAPI port on the server
+- the local tunnel port on the Mac
+- the Vast.ai SSH port
+- the server IP or hostname
+
+These values may be written to .env so the script can print the exact SSH
+tunnel command for the current machine.
+
+Example SSH tunnel used successfully during testing:
+
+ssh -p 27608 root@151.237.25.234 \
+    -L 8011:localhost:8011
+
 Immediate objective
 
 Build the first reproducible Toox 3D repository and installer.
