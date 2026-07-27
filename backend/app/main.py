@@ -17,7 +17,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/generate-v1")
+@app.post("/generate-v1", response_model=None)
 async def generate_v1(
     image: UploadFile = File(...),
     octree_resolution: int = Form(384),
@@ -27,7 +27,7 @@ async def generate_v1(
     remove_background: bool = Form(True),
     download_mode: str = Form("bundle"),
     download_stl: bool = Form(False),
-) -> dict | FileResponse:
+):
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
 
