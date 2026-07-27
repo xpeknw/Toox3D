@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 
+class CudaUnavailableError(RuntimeError):
+    pass
+
+
 class HunyuanV1Service:
     MODEL_ID = "tencent/Hunyuan3D-2mini"
     MODEL_SUBFOLDER = "hunyuan3d-dit-v2-mini-turbo"
@@ -200,9 +204,7 @@ class HunyuanV1Service:
             self._ensure_repo()
             self._configure_environment()
             self._ensure_repo_in_syspath()
-
-            if not torch.cuda.is_available():
-                raise RuntimeError("PyTorch did not detect CUDA.")
+            self._assert_cuda_ready()
 
             from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
@@ -214,6 +216,64 @@ class HunyuanV1Service:
             )
 
         return self._pipeline
+
+    def _assert_cuda_ready(self) -> None:
+        torch = self._ensure_torch()
+
+        try:
+            if not torch.cuda.is_available():
+                raise CudaUnavailableError(self._build_cuda_diagnostics())
+
+            device_count = torch.cuda.device_count()
+            if device_count < 1:
+                raise CudaUnavailableError(self._build_cuda_diagnostics())
+
+            torch.cuda.get_device_name(0)
+        except CudaUnavailableError:
+            raise
+        except Exception as exc:
+            diagnostics = self._build_cuda_diagnostics()
+            raise CudaUnavailableError(
+                f"CUDA is not usable on this server. {diagnostics}"
+            ) from exc
+
+    def _build_cuda_diagnostics(self) -> str:
+        details: list[str] = [
+            "PyTorch cannot use CUDA on this host."
+        ]
+
+        nvidia_smi_output = self._read_nvidia_smi_output()
+        if nvidia_smi_output:
+            details.append(f"nvidia-smi: {nvidia_smi_output}")
+
+        details.append(
+            "This usually means the VM GPU, NVIDIA driver, CUDA runtime, "
+            "or container runtime are incompatible."
+        )
+        details.append(
+            "The log 'forward compatibility was attempted on non supported HW' "
+            "commonly points to a driver/CUDA stack mismatch on the server."
+        )
+        return " ".join(details)
+
+    def _read_nvidia_smi_output(self) -> str:
+        try:
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,driver_version,cuda_version",
+                    "--format=csv,noheader",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return ""
+
+        return " | ".join(
+            line.strip() for line in result.stdout.splitlines() if line.strip()
+        )
 
     def _ensure_repo(self) -> None:
         repo_ok = (
@@ -363,4 +423,3 @@ class HunyuanV1Service:
 
 
 service = HunyuanV1Service()
-

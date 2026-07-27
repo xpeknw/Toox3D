@@ -231,8 +231,8 @@ configure_runtime_values() {
 
 sync_dependencies() {
   export PATH="$HOME/.local/bin:$PATH"
-  log "Syncing Python dependencies with uv"
-  (cd "$PROJECT_ROOT" && uv sync)
+  log "Syncing Python dependencies with uv (base + hunyuan-v1)"
+  (cd "$PROJECT_ROOT" && uv sync --extra hunyuan-v1)
 }
 
 ensure_python_multipart() {

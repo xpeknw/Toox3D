@@ -44,7 +44,7 @@ The first server boot may take several minutes because it may need to:
 
 - install `uv`
 - install Docker
-- resolve Python dependencies
+- resolve Python dependencies, including the Hunyuan V1 stack
 - build the Docker image
 
 During `bootstrap.sh`, the script can ask for:
@@ -70,6 +70,8 @@ uv sync
 ```
 
 This creates `uv.lock` if it does not exist yet.
+
+This sync installs both the API dependencies and the Hunyuan V1 stack.
 
 Run the API:
 

@@ -5,10 +5,17 @@ description = "Toox 3D backend foundation"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
+    "fastapi>=0.116.0,<0.117.0",
+    "python-multipart>=0.0.20",
+    "uvicorn[standard]>=0.35.0,<0.36.0",
+]
+
+[project.optional-dependencies]
+hunyuan-v1 = [
     "accelerate>=0.33.0",
     "diffusers>=0.30.0,<0.36",
-    "fastapi>=0.116.0,<0.117.0",
     "huggingface_hub==0.34.4",
+    "einops",
     "numpy<2.1",
     "omegaconf",
     "onnxruntime>=1.22.1,<1.23.0",
@@ -17,14 +24,13 @@ dependencies = [
     "pybind11",
     "pygltflib",
     "pymeshlab",
-    "python-multipart>=0.0.20",
     "rembg",
     "safetensors",
+    "tqdm",
     "trimesh>=4.4.0",
     "transformers>=4.44.0,<5",
     "torch>=2.5.0,<2.9.0",
     "torchvision>=0.20.0,<0.24.0",
-    "uvicorn[standard]>=0.35.0,<0.36.0",
     "xatlas",
 ]
 

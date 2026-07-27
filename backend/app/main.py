@@ -3,7 +3,10 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from backend.app.services.hunyuan_v1 import service as hunyuan_v1_service
+from backend.app.services.hunyuan_v1 import (
+    CudaUnavailableError,
+    service as hunyuan_v1_service,
+)
 
 
 app = FastAPI(title="Toox 3D")
@@ -41,6 +44,8 @@ async def generate_v1(
             remove_background=remove_background,
         )
     except Exception as exc:
+        if isinstance(exc, CudaUnavailableError):
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
