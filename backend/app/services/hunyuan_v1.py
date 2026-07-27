@@ -628,25 +628,64 @@ class HunyuanV1Service:
         operations: list[str] = []
 
         try:
-            simplified_mesh = self._simplify_with_pymeshlab(
+            repaired_mesh = self._repair_with_pymeshlab(
+                mesh=print_mesh,
+            )
+            if repaired_mesh is not None:
+                print_mesh = repaired_mesh
+                operations.append(
+                    f"repair:{original_faces}->{len(print_mesh.faces)}"
+                )
+
+            remeshed_mesh = self._remesh_with_pymeshlab(
+                mesh=print_mesh,
+                profile_name=profile_name,
+            )
+            if remeshed_mesh is not None:
+                before_remesh_faces = len(print_mesh.faces)
+                print_mesh = remeshed_mesh
+                operations.append(
+                    f"remesh:{before_remesh_faces}->{len(print_mesh.faces)}"
+                )
+
+            decimated_mesh = self._decimate_with_pymeshlab(
                 mesh=print_mesh,
                 target_faces=target_faces,
+                aggressive=False,
             )
-            if simplified_mesh is not None:
-                print_mesh = simplified_mesh
-                operations.append("quadric_decimation")
+            if decimated_mesh is not None:
+                before_decimate_faces = len(print_mesh.faces)
+                print_mesh = decimated_mesh
+                operations.append(
+                    f"decimate:{before_decimate_faces}->{len(print_mesh.faces)}"
+                )
 
             if int(len(print_mesh.faces)) >= int(original_faces * 0.98):
-                fallback_mesh = self._simplify_with_pymeshlab(
+                fallback_mesh = self._decimate_with_pymeshlab(
                     mesh=print_mesh,
                     target_faces=target_faces,
                     aggressive=True,
                 )
                 if fallback_mesh is not None:
+                    before_fallback_faces = len(print_mesh.faces)
                     print_mesh = fallback_mesh
-                    operations.append("quadric_decimation_aggressive")
+                    operations.append(
+                        "decimate_aggressive:"
+                        f"{before_fallback_faces}->{len(print_mesh.faces)}"
+                    )
+
+            smoothed_mesh = self._smooth_with_pymeshlab(
+                mesh=print_mesh,
+                profile_name=profile_name,
+            )
+            if smoothed_mesh is not None:
+                print_mesh = smoothed_mesh
+                operations.append(f"smooth:{len(print_mesh.faces)}")
         except Exception as exc:
             operations.append(f"simplification_skipped:{exc}")
+
+        if int(len(print_mesh.faces)) >= int(original_faces * 0.98):
+            operations.append("reduction_warning:no_meaningful_reduction")
 
         self._cleanup_mesh(print_mesh)
 
@@ -687,31 +726,26 @@ class HunyuanV1Service:
             min(int(profile["max_faces"]), scaled_target),
         )
 
-    def _simplify_with_pymeshlab(
+    def _repair_with_pymeshlab(
         self,
         *,
         mesh: Any,
-        target_faces: int,
-        aggressive: bool = False,
     ) -> Any | None:
-        if int(len(mesh.faces)) <= target_faces:
-            return mesh.copy()
-
-        import numpy as np
-        import pymeshlab
-        import trimesh
-
-        ms = pymeshlab.MeshSet()
-        ms.add_mesh(
-            pymeshlab.Mesh(
-                vertex_matrix=np.asarray(mesh.vertices, dtype=float),
-                face_matrix=np.asarray(mesh.faces, dtype=int),
-            ),
-            "raw_mesh",
-        )
-
+        ms, pymeshlab, trimesh = self._make_meshset(mesh)
         try:
             ms.meshing_remove_unreferenced_vertices()
+        except Exception:
+            pass
+        try:
+            ms.meshing_remove_duplicate_faces()
+        except Exception:
+            pass
+        try:
+            ms.meshing_remove_duplicate_vertices()
+        except Exception:
+            pass
+        try:
+            ms.meshing_remove_null_faces()
         except Exception:
             pass
         try:
@@ -726,6 +760,55 @@ class HunyuanV1Service:
             ms.meshing_close_holes(maxholesize=64)
         except Exception:
             pass
+        try:
+            ms.meshing_remove_connected_component_by_diameter(
+                mincomponentdiag=pymeshlab.PercentageValue(2.0)
+            )
+        except Exception:
+            pass
+        return self._meshset_to_trimesh(ms, trimesh)
+
+    def _remesh_with_pymeshlab(
+        self,
+        *,
+        mesh: Any,
+        profile_name: str,
+    ) -> Any | None:
+        ms, pymeshlab, trimesh = self._make_meshset(mesh)
+        profile_iterations = {
+            "safe": 3,
+            "balanced": 4,
+            "aggressive": 5,
+        }
+        try:
+            ms.meshing_isotropic_explicit_remeshing(
+                iterations=profile_iterations.get(profile_name, 4),
+                adaptive=True,
+                selectedonly=False,
+            )
+        except Exception:
+            return None
+        return self._meshset_to_trimesh(ms, trimesh)
+
+    def _decimate_with_pymeshlab(
+        self,
+        *,
+        mesh: Any,
+        target_faces: int,
+        aggressive: bool,
+    ) -> Any | None:
+        if int(len(mesh.faces)) <= target_faces:
+            return mesh.copy()
+
+        ms, _pymeshlab, trimesh = self._make_meshset(mesh)
+
+        if not aggressive:
+            try:
+                ms.meshing_decimation_edge_collapse_for_marching_cube_meshes(
+                    targetfacenum=target_faces
+                )
+            except Exception:
+                pass
 
         decimation_kwargs = {
             "targetfacenum": target_faces,
@@ -752,21 +835,48 @@ class HunyuanV1Service:
             )
 
         ms.meshing_decimation_quadric_edge_collapse(**decimation_kwargs)
+        return self._meshset_to_trimesh(ms, trimesh)
 
+    def _smooth_with_pymeshlab(
+        self,
+        *,
+        mesh: Any,
+        profile_name: str,
+    ) -> Any | None:
+        ms, _pymeshlab, trimesh = self._make_meshset(mesh)
         try:
-            ms.meshing_remove_connected_component_by_diameter(
-                mincomponentdiag=pymeshlab.PercentageValue(2.0)
+            ms.apply_coord_taubin_smoothing(
+                stepsmoothnum={"safe": 3, "balanced": 5, "aggressive": 7}.get(
+                    profile_name,
+                    5,
+                )
             )
         except Exception:
-            pass
+            return None
+        return self._meshset_to_trimesh(ms, trimesh)
 
+    def _make_meshset(self, mesh: Any):
+        import numpy as np
+        import pymeshlab
+        import trimesh
+
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(
+            pymeshlab.Mesh(
+                vertex_matrix=np.asarray(mesh.vertices, dtype=float),
+                face_matrix=np.asarray(mesh.faces, dtype=int),
+            ),
+            "mesh",
+        )
+        return ms, pymeshlab, trimesh
+
+    def _meshset_to_trimesh(self, ms: Any, trimesh_module: Any) -> Any:
         current = ms.current_mesh()
-        simplified = trimesh.Trimesh(
+        return trimesh_module.Trimesh(
             vertices=current.vertex_matrix(),
             faces=current.face_matrix(),
             process=False,
         )
-        return simplified
 
     def _export_meshes(
         self,

@@ -395,6 +395,7 @@ class HunyuanJobManager:
             "print_vertices": print_mesh.get("vertices"),
             "print_target_faces": print_mesh.get("target_faces"),
             "print_reduction_ratio": print_mesh.get("reduction_ratio"),
+            "print_operations": print_mesh.get("operations"),
             "bundle_size_mb": bundle_size_mb,
             "all_bundle_size_mb": all_bundle_size_mb,
         }
