@@ -214,6 +214,19 @@ sync_dependencies() {
   (cd "$PROJECT_ROOT" && uv sync)
 }
 
+ensure_python_multipart() {
+  export PATH="$HOME/.local/bin:$PATH"
+  log "Verifying python-multipart"
+
+  if (cd "$PROJECT_ROOT" && uv run python -c "import multipart") >/dev/null 2>&1; then
+    log "python-multipart already available"
+    return
+  fi
+
+  log "Installing python-multipart"
+  (cd "$PROJECT_ROOT" && uv pip install python-multipart)
+}
+
 print_next_steps() {
   local toox_port local_tunnel_port ssh_port ssh_host
   toox_port="$(get_env_value "TOOX_PORT" "8011")"
@@ -258,6 +271,7 @@ main() {
   ensure_directories
   configure_runtime_values
   sync_dependencies
+  ensure_python_multipart
   print_next_steps
 }
 
