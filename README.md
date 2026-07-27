@@ -124,7 +124,8 @@ Example request:
 
 ```bash
 curl -X POST "http://127.0.0.1:8011/generate-v1" \
-  -F "image=@/absolute/path/to/input.png"
+  -F "image=@/absolute/path/to/input.png" \
+  -F "preset=v1-stable"
 ```
 
 Download bundle ZIP with `metadata.json + STL`:
@@ -169,6 +170,76 @@ Expected response shape:
     "all": "/downloads/<job-id>/all"
   }
 }
+```
+
+## V2 Jobs
+
+V2 is designed so the heavy generation work finishes independently of the
+download. Submit a job first, poll its status, and download only when it is
+ready.
+
+Create a job:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/v2/jobs" \
+  -F "image=@/absolute/path/to/input.png" \
+  -F "preset=high"
+```
+
+List available presets:
+
+```bash
+curl "http://127.0.0.1:8011/v2/presets"
+```
+
+Typical response:
+
+```json
+{
+  "job_id": "pieza_20260727_123456_ab12cd34",
+  "status": "queued",
+  "progress_percent": 0,
+  "progress_message": "Queued",
+  "status_url": "/v2/jobs/pieza_20260727_123456_ab12cd34",
+  "timing": {
+    "average_completed_job_seconds": 120.0,
+    "queue_position": 1,
+    "estimated_wait_seconds": 0.0,
+    "estimated_total_seconds": 120.0
+  },
+  "bundle_urls": {
+    "bundle": "/downloads/pieza_20260727_123456_ab12cd34/bundle",
+    "all": "/downloads/pieza_20260727_123456_ab12cd34/all"
+  }
+}
+```
+
+Built-in presets:
+
+- `v1-stable`: `384 / 30 / 5.5`
+- `high`: `512 / 30 / 5.5`
+- `max`: `512 / 40 / 5.5`
+
+Manual overrides can still be sent together with a preset. For example, you can
+submit `preset=high` and override only `num_inference_steps=36`.
+
+Poll a single job:
+
+```bash
+curl "http://127.0.0.1:8011/v2/jobs/<job-id>"
+```
+
+List recent jobs:
+
+```bash
+curl "http://127.0.0.1:8011/v2/jobs?limit=20"
+```
+
+Download when the job reaches `completed`:
+
+```bash
+curl -L "http://127.0.0.1:8011/downloads/<job-id>/bundle" \
+  --output modelo_bundle.zip
 ```
 
 ## Fresh Ubuntu 22.04 VM

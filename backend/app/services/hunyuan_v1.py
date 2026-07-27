@@ -9,7 +9,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 class CudaUnavailableError(RuntimeError):
@@ -42,14 +42,18 @@ class HunyuanV1Service:
         filename: str,
         content: bytes,
         *,
+        job_id: str | None = None,
+        preset: str | None = None,
         octree_resolution: int = 384,
         num_inference_steps: int = 30,
         guidance_scale: float = 5.5,
         seed: int = 1234,
         remove_background: bool = True,
+        progress_callback: Callable[[int, str], None] | None = None,
     ) -> dict[str, Any]:
         started_at = time.time()
-        output_dir = self._create_output_dir(filename)
+        self._report_progress(progress_callback, 2, "Preparing output directory")
+        output_dir = self._create_output_dir(filename, job_id=job_id)
         safe_name = self._sanitize_filename(filename)
         input_suffix = Path(safe_name).suffix.lower() or ".png"
         input_path = output_dir / f"input{input_suffix}"
@@ -65,14 +69,17 @@ class HunyuanV1Service:
             content=content,
             output_dir=output_dir,
             remove_background=remove_background,
+            progress_callback=progress_callback,
         )
 
+        self._report_progress(progress_callback, 20, "Loading Hunyuan pipeline")
         pipeline = self._ensure_pipeline()
         torch = self._torch
         assert torch is not None
 
         generator = torch.Generator(device="cuda").manual_seed(seed)
 
+        self._report_progress(progress_callback, 45, "Generating 3D mesh")
         with torch.inference_mode():
             result = pipeline(
                 image=image,
@@ -86,6 +93,7 @@ class HunyuanV1Service:
         if mesh is None:
             raise RuntimeError("The Hunyuan pipeline returned no mesh.")
 
+        self._report_progress(progress_callback, 82, "Exporting mesh artifacts")
         self._cleanup_mesh(mesh)
         exports = self._export_mesh(mesh, Path(safe_name).stem, output_dir)
 
@@ -96,6 +104,7 @@ class HunyuanV1Service:
             "processed_image": str(processed_image_path),
             "model_id": self.MODEL_ID,
             "model_subfolder": self.MODEL_SUBFOLDER,
+            "preset": preset,
             "octree_resolution": octree_resolution,
             "num_inference_steps": num_inference_steps,
             "guidance_scale": guidance_scale,
@@ -120,6 +129,7 @@ class HunyuanV1Service:
             f"/artifacts/{output_dir.name}/metadata.json"
         )
 
+        self._report_progress(progress_callback, 100, "Generation completed")
         del mesh
         del image
         self._cleanup_gpu()
@@ -230,11 +240,20 @@ class HunyuanV1Service:
             for char in Path(name).name
         )
 
-    def _create_output_dir(self, filename: str) -> Path:
-        base_name = Path(self._sanitize_filename(filename)).stem
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        unique_id = uuid.uuid4().hex[:8]
-        output_dir = self.outputs_root / f"{base_name}_{timestamp}_{unique_id}"
+    def _create_output_dir(
+        self,
+        filename: str,
+        job_id: str | None = None,
+    ) -> Path:
+        if job_id is None:
+            base_name = Path(self._sanitize_filename(filename)).stem
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
+            directory_name = f"{base_name}_{timestamp}_{unique_id}"
+        else:
+            directory_name = self._sanitize_filename(job_id)
+
+        output_dir = self.outputs_root / directory_name
 
         (output_dir / "STL").mkdir(parents=True, exist_ok=False)
         (output_dir / "OBJ").mkdir(parents=True, exist_ok=True)
@@ -248,6 +267,7 @@ class HunyuanV1Service:
         content: bytes,
         output_dir: Path,
         remove_background: bool,
+        progress_callback: Callable[[int, str], None] | None = None,
     ) -> tuple[Any, Path, bool]:
         image_module = self._ensure_image_module()
         image = image_module.open(io.BytesIO(content))
@@ -256,15 +276,29 @@ class HunyuanV1Service:
 
         remove_background_applied = False
         if remove_background and not useful_alpha:
+            self._report_progress(progress_callback, 12, "Removing background")
             image = self._ensure_background_remover()(image)
             remove_background_applied = True
             self._cleanup_gpu()
+        else:
+            self._report_progress(progress_callback, 10, "Preparing input image")
 
         processed_image_path = (
             output_dir / "processed_image" / "imagen_procesada.png"
         )
         image.save(processed_image_path)
         return image, processed_image_path, remove_background_applied
+
+    def _report_progress(
+        self,
+        progress_callback: Callable[[int, str], None] | None,
+        percent: int,
+        message: str,
+    ) -> None:
+        if progress_callback is None:
+            return
+
+        progress_callback(percent, message)
 
     def _detect_useful_alpha(self, image: Any) -> bool:
         if image.mode not in ("RGBA", "LA"):
