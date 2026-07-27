@@ -55,6 +55,16 @@ def resolve_generation_params(
         )
 
     preset_values = GENERATION_PRESETS[normalized_preset]
+
+    if octree_resolution is not None and octree_resolution <= 0:
+        octree_resolution = None
+
+    if num_inference_steps is not None and num_inference_steps <= 0:
+        num_inference_steps = None
+
+    if guidance_scale is not None and guidance_scale <= 0:
+        guidance_scale = None
+
     return {
         "preset": normalized_preset,
         "octree_resolution": (
