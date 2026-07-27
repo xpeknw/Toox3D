@@ -1,0 +1,21 @@
+services:
+  toox3d-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: toox3d-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app/backend
+      - ./models:/app/models
+      - ./outputs:/app/outputs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
