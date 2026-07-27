@@ -16,6 +16,10 @@ class CudaUnavailableError(RuntimeError):
     pass
 
 
+class MeshGenerationError(RuntimeError):
+    pass
+
+
 class HunyuanV1Service:
     MODEL_ID = "tencent/Hunyuan3D-2mini"
     MODEL_SUBFOLDER = "hunyuan3d-dit-v2-mini-turbo"
@@ -80,18 +84,29 @@ class HunyuanV1Service:
         generator = torch.Generator(device="cuda").manual_seed(seed)
 
         self._report_progress(progress_callback, 45, "Generating 3D mesh")
-        with torch.inference_mode():
-            result = pipeline(
-                image=image,
-                num_inference_steps=num_inference_steps,
-                guidance_scale=guidance_scale,
-                generator=generator,
-                octree_resolution=octree_resolution,
-            )
+        try:
+            with torch.inference_mode():
+                result = pipeline(
+                    image=image,
+                    num_inference_steps=num_inference_steps,
+                    guidance_scale=guidance_scale,
+                    generator=generator,
+                    octree_resolution=octree_resolution,
+                )
+        except ValueError as exc:
+            if "Input array must be at le" in str(exc):
+                raise MeshGenerationError(
+                    "The model could not extract a valid surface from this image. "
+                    "Try a cleaner source image, a clearer object silhouette, or "
+                    "reduce octree_resolution to 384."
+                ) from exc
+            raise
 
         mesh = result[0]
         if mesh is None:
-            raise RuntimeError("The Hunyuan pipeline returned no mesh.")
+            raise MeshGenerationError(
+                "The Hunyuan pipeline returned no mesh for this image."
+            )
 
         self._report_progress(progress_callback, 82, "Exporting mesh artifacts")
         self._cleanup_mesh(mesh)

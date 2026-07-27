@@ -161,6 +161,7 @@ class HunyuanJobManager:
                 filename=record.filename,
                 content=content,
                 job_id=job_id,
+                preset=record.params["preset"],
                 octree_resolution=record.params["octree_resolution"],
                 num_inference_steps=record.params["num_inference_steps"],
                 guidance_scale=record.params["guidance_scale"],

@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from backend.app.services.job_manager import manager as job_manager
 from backend.app.services.hunyuan_v1 import (
     CudaUnavailableError,
+    MeshGenerationError,
     service as hunyuan_v1_service,
 )
 
@@ -180,6 +181,8 @@ async def generate_v1(
     except Exception as exc:
         if isinstance(exc, CudaUnavailableError):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if isinstance(exc, MeshGenerationError):
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         if isinstance(exc, HTTPException):
             raise exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
