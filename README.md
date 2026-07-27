@@ -30,6 +30,16 @@ and then exposing:
 GET /health
 ```
 
+After the infrastructure milestone, the repository also includes a first
+compatibility endpoint:
+
+```text
+POST /generate-v1
+```
+
+This endpoint is intended to reproduce the working Hunyuan V1 behavior as
+closely as practical outside Colab.
+
 The first server boot may take several minutes because it may need to:
 
 - install `uv`
@@ -97,6 +107,41 @@ Stop:
 
 ```bash
 docker compose down
+```
+
+## Generate V1
+
+The first request to `POST /generate-v1` may take significantly longer because
+it may need to:
+
+- clone the Tencent Hunyuan3D-2 repository
+- download model weights from Hugging Face
+- initialize the model in GPU memory
+
+Example request:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/generate-v1" \
+  -F "image=@/absolute/path/to/input.png"
+```
+
+Expected response shape:
+
+```json
+{
+  "job_id": "part_20260727_ab12cd34",
+  "exports": {
+    "stl": {"ok": true, "path": "..."},
+    "obj": {"ok": true, "path": "..."},
+    "glb": {"ok": true, "path": "..."}
+  },
+  "download_urls": {
+    "stl": "/artifacts/<job-id>/STL/<file>.stl",
+    "obj": "/artifacts/<job-id>/OBJ/<file>.obj",
+    "glb": "/artifacts/<job-id>/GLB/<file>.glb",
+    "processed_image": "/artifacts/<job-id>/processed_image/imagen_procesada.png"
+  }
+}
 ```
 
 ## Fresh Ubuntu 22.04 VM

@@ -5,8 +5,27 @@ description = "Toox 3D backend foundation"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
+    "accelerate>=0.33.0",
+    "diffusers>=0.30.0,<0.36",
     "fastapi>=0.116.0,<0.117.0",
+    "huggingface_hub==0.34.4",
+    "numpy<2.1",
+    "omegaconf",
+    "onnxruntime",
+    "opencv-python-headless",
+    "pillow",
+    "pybind11",
+    "pygltflib",
+    "pymeshlab",
+    "python-multipart>=0.0.20",
+    "rembg",
+    "safetensors",
+    "trimesh>=4.4.0",
+    "transformers>=4.44.0,<5",
+    "torch>=2.5.0,<2.9.0",
+    "torchvision>=0.20.0,<0.24.0",
     "uvicorn[standard]>=0.35.0,<0.36.0",
+    "xatlas",
 ]
 
 [build-system]
