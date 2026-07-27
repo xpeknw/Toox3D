@@ -635,6 +635,16 @@ class HunyuanV1Service:
             if simplified_mesh is not None:
                 print_mesh = simplified_mesh
                 operations.append("quadric_decimation")
+
+            if int(len(print_mesh.faces)) >= int(original_faces * 0.98):
+                fallback_mesh = self._simplify_with_pymeshlab(
+                    mesh=print_mesh,
+                    target_faces=target_faces,
+                    aggressive=True,
+                )
+                if fallback_mesh is not None:
+                    print_mesh = fallback_mesh
+                    operations.append("quadric_decimation_aggressive")
         except Exception as exc:
             operations.append(f"simplification_skipped:{exc}")
 
@@ -682,6 +692,7 @@ class HunyuanV1Service:
         *,
         mesh: Any,
         target_faces: int,
+        aggressive: bool = False,
     ) -> Any | None:
         if int(len(mesh.faces)) <= target_faces:
             return mesh.copy()
@@ -716,16 +727,38 @@ class HunyuanV1Service:
         except Exception:
             pass
 
-        ms.meshing_decimation_quadric_edge_collapse(
-            targetfacenum=target_faces,
-            preservenormal=True,
-            preservetopology=True,
-            preserveboundary=True,
-            optimalplacement=True,
-            planarquadric=True,
-            qualitythr=0.4,
-            boundaryweight=1.0,
-        )
+        decimation_kwargs = {
+            "targetfacenum": target_faces,
+            "preservenormal": True,
+            "optimalplacement": True,
+            "planarquadric": True,
+            "qualitythr": 0.4,
+            "boundaryweight": 1.0,
+        }
+
+        if aggressive:
+            decimation_kwargs.update(
+                {
+                    "preservetopology": False,
+                    "preserveboundary": False,
+                }
+            )
+        else:
+            decimation_kwargs.update(
+                {
+                    "preservetopology": True,
+                    "preserveboundary": True,
+                }
+            )
+
+        ms.meshing_decimation_quadric_edge_collapse(**decimation_kwargs)
+
+        try:
+            ms.meshing_remove_connected_component_by_diameter(
+                mincomponentdiag=pymeshlab.PercentageValue(2.0)
+            )
+        except Exception:
+            pass
 
         current = ms.current_mesh()
         simplified = trimesh.Trimesh(
