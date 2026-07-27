@@ -733,36 +733,38 @@ class HunyuanV1Service:
     ) -> Any | None:
         ms, pymeshlab, trimesh = self._make_meshset(mesh)
         try:
-            ms.meshing_remove_unreferenced_vertices()
+            self._run_pymeshlab_filter(ms, "meshing_remove_unreferenced_vertices")
         except Exception:
             pass
         try:
-            ms.meshing_remove_duplicate_faces()
+            self._run_pymeshlab_filter(ms, "meshing_remove_duplicate_faces")
         except Exception:
             pass
         try:
-            ms.meshing_remove_duplicate_vertices()
+            self._run_pymeshlab_filter(ms, "meshing_remove_duplicate_vertices")
         except Exception:
             pass
         try:
-            ms.meshing_remove_null_faces()
+            self._run_pymeshlab_filter(ms, "meshing_remove_null_faces")
         except Exception:
             pass
         try:
-            ms.meshing_repair_non_manifold_edges()
+            self._run_pymeshlab_filter(ms, "meshing_repair_non_manifold_edges")
         except Exception:
             pass
         try:
-            ms.meshing_repair_non_manifold_vertices()
+            self._run_pymeshlab_filter(ms, "meshing_repair_non_manifold_vertices")
         except Exception:
             pass
         try:
-            ms.meshing_close_holes(maxholesize=64)
+            self._run_pymeshlab_filter(ms, "meshing_close_holes", maxholesize=64)
         except Exception:
             pass
         try:
-            ms.meshing_remove_connected_component_by_diameter(
-                mincomponentdiag=pymeshlab.PercentageValue(2.0)
+            self._run_pymeshlab_filter(
+                ms,
+                "meshing_remove_connected_component_by_diameter",
+                mincomponentdiag=pymeshlab.PercentageValue(2.0),
             )
         except Exception:
             pass
@@ -781,7 +783,9 @@ class HunyuanV1Service:
             "aggressive": 5,
         }
         try:
-            ms.meshing_isotropic_explicit_remeshing(
+            self._run_pymeshlab_filter(
+                ms,
+                "meshing_isotropic_explicit_remeshing",
                 iterations=profile_iterations.get(profile_name, 4),
                 adaptive=True,
                 selectedonly=False,
@@ -804,8 +808,10 @@ class HunyuanV1Service:
 
         if not aggressive:
             try:
-                ms.meshing_decimation_edge_collapse_for_marching_cube_meshes(
-                    targetfacenum=target_faces
+                self._run_pymeshlab_filter(
+                    ms,
+                    "meshing_decimation_edge_collapse_for_marching_cube_meshes",
+                    targetfacenum=target_faces,
                 )
             except Exception:
                 pass
@@ -834,7 +840,11 @@ class HunyuanV1Service:
                 }
             )
 
-        ms.meshing_decimation_quadric_edge_collapse(**decimation_kwargs)
+        self._run_pymeshlab_filter(
+            ms,
+            "meshing_decimation_quadric_edge_collapse",
+            **decimation_kwargs,
+        )
         return self._meshset_to_trimesh(ms, trimesh)
 
     def _smooth_with_pymeshlab(
@@ -845,7 +855,9 @@ class HunyuanV1Service:
     ) -> Any | None:
         ms, _pymeshlab, trimesh = self._make_meshset(mesh)
         try:
-            ms.apply_coord_taubin_smoothing(
+            self._run_pymeshlab_filter(
+                ms,
+                "apply_coord_taubin_smoothing",
                 stepsmoothnum={"safe": 3, "balanced": 5, "aggressive": 7}.get(
                     profile_name,
                     5,
@@ -869,6 +881,24 @@ class HunyuanV1Service:
             "mesh",
         )
         return ms, pymeshlab, trimesh
+
+    def _run_pymeshlab_filter(
+        self,
+        meshset: Any,
+        filter_name: str,
+        **kwargs: Any,
+    ) -> Any:
+        method = getattr(meshset, filter_name, None)
+        if callable(method):
+            return method(**kwargs)
+
+        apply_filter = getattr(meshset, "apply_filter", None)
+        if callable(apply_filter):
+            return apply_filter(filter_name, **kwargs)
+
+        raise AttributeError(
+            f"MeshSet does not support '{filter_name}' or apply_filter()."
+        )
 
     def _meshset_to_trimesh(self, ms: Any, trimesh_module: Any) -> Any:
         current = ms.current_mesh()
