@@ -25,7 +25,9 @@ async def generate_v1(
     guidance_scale: float = Form(5.5),
     seed: int = Form(1234),
     remove_background: bool = Form(True),
-) -> dict:
+    download_mode: str = Form("bundle"),
+    download_stl: bool = Form(False),
+) -> dict | FileResponse:
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
 
@@ -33,8 +35,15 @@ async def generate_v1(
     if not content:
         raise HTTPException(status_code=400, detail="Image file is empty.")
 
+    normalized_mode = download_mode.strip().lower()
+    if normalized_mode not in {"bundle", "all", "json"}:
+        raise HTTPException(
+            status_code=400,
+            detail="download_mode must be one of: bundle, all, json.",
+        )
+
     try:
-        return hunyuan_v1_service.generate(
+        result = hunyuan_v1_service.generate(
             filename=image.filename,
             content=content,
             octree_resolution=octree_resolution,
@@ -43,9 +52,38 @@ async def generate_v1(
             seed=seed,
             remove_background=remove_background,
         )
+
+        if download_stl:
+            stl_export = result["exports"].get("stl")
+            if not stl_export or not stl_export.get("ok"):
+                raise HTTPException(
+                    status_code=500,
+                    detail="STL export was not generated successfully.",
+                )
+
+            return FileResponse(
+                path=stl_export["path"],
+                filename=Path(stl_export["path"]).name,
+                media_type="model/stl",
+            )
+
+        if normalized_mode == "json":
+            return result
+
+        bundle_path = hunyuan_v1_service.build_download_bundle(
+            result,
+            include_all=normalized_mode == "all",
+        )
+        return FileResponse(
+            path=bundle_path,
+            filename=bundle_path.name,
+            media_type="application/zip",
+        )
     except Exception as exc:
         if isinstance(exc, CudaUnavailableError):
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if isinstance(exc, HTTPException):
+            raise exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

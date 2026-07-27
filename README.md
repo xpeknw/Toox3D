@@ -124,7 +124,34 @@ Example request:
 
 ```bash
 curl -X POST "http://127.0.0.1:8011/generate-v1" \
-  -F "image=@/absolute/path/to/input.png"
+  -F "image=@/absolute/path/to/input.png" \
+  --output modelo_bundle.zip
+```
+
+Full ZIP with STL + OBJ + GLB + metadata + processed image:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/generate-v1" \
+  -F "image=@/absolute/path/to/input.png" \
+  -F "download_mode=all" \
+  --output modelo_all.zip
+```
+
+JSON response only:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/generate-v1" \
+  -F "image=@/absolute/path/to/input.png" \
+  -F "download_mode=json"
+```
+
+Legacy direct STL download:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/generate-v1" \
+  -F "image=@/absolute/path/to/input.png" \
+  -F "download_stl=true" \
+  --output modelo.stl
 ```
 
 Expected response shape:

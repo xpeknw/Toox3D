@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +136,56 @@ class HunyuanV1Service:
             raise FileNotFoundError("Artifact not found.")
 
         return target_path
+
+    def build_download_bundle(
+        self,
+        generation_result: dict[str, Any],
+        *,
+        include_all: bool,
+    ) -> Path:
+        job_id = generation_result["job_id"]
+        output_dir = self.outputs_root / job_id
+        bundle_name = "all" if include_all else "bundle"
+        zip_path = output_dir / f"{job_id}_{bundle_name}.zip"
+
+        files_to_include: list[tuple[Path, Path]] = []
+
+        metadata_path = Path(generation_result["metadata_path"])
+        files_to_include.append((metadata_path, Path("metadata.json")))
+
+        stl_export = generation_result["exports"].get("stl")
+        if stl_export and stl_export.get("ok"):
+            stl_path = Path(stl_export["path"])
+            files_to_include.append((stl_path, Path("STL") / stl_path.name))
+
+        if include_all:
+            for export_type in ("obj", "glb"):
+                export_data = generation_result["exports"].get(export_type)
+                if not export_data or not export_data.get("ok"):
+                    continue
+
+                export_path = Path(export_data["path"])
+                files_to_include.append(
+                    (
+                        export_path,
+                        Path(export_type.upper()) / export_path.name,
+                    )
+                )
+
+            processed_image_path = Path(generation_result["processed_image"])
+            files_to_include.append(
+                (
+                    processed_image_path,
+                    Path("processed_image") / processed_image_path.name,
+                )
+            )
+
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zip_handle:
+            for source_path, archive_path in files_to_include:
+                if source_path.exists() and source_path.is_file():
+                    zip_handle.write(source_path, archive_path.as_posix())
+
+        return zip_path
 
     def _resolve_path(self, configured_path: str) -> Path:
         raw_path = Path(configured_path)
