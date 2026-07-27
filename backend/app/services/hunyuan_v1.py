@@ -24,6 +24,23 @@ class MeshGenerationError(RuntimeError):
 class HunyuanV1Service:
     MODEL_ID = "tencent/Hunyuan3D-2mini"
     MODEL_SUBFOLDER = "hunyuan3d-dit-v2-mini-turbo"
+    PRINT_PROFILES = {
+        "safe": {
+            "ratio": 0.42,
+            "min_faces": 32000,
+            "max_faces": 90000,
+        },
+        "balanced": {
+            "ratio": 0.22,
+            "min_faces": 18000,
+            "max_faces": 60000,
+        },
+        "aggressive": {
+            "ratio": 0.12,
+            "min_faces": 9000,
+            "max_faces": 32000,
+        },
+    }
 
     def __init__(self) -> None:
         self.project_root = Path(__file__).resolve().parents[3]
@@ -54,6 +71,7 @@ class HunyuanV1Service:
         guidance_scale: float = 5.5,
         seed: int = 1234,
         remove_background: bool = True,
+        print_profile: str = "balanced",
         progress_callback: Callable[[int, str], None] | None = None,
     ) -> dict[str, Any]:
         started_at = time.time()
@@ -120,9 +138,27 @@ class HunyuanV1Service:
                 "The Hunyuan pipeline returned no mesh for this image."
             )
 
-        self._report_progress(progress_callback, 82, "Exporting mesh artifacts")
+        self._report_progress(progress_callback, 80, "Cleaning raw mesh")
         self._cleanup_mesh(mesh)
-        exports = self._export_mesh(mesh, Path(safe_name).stem, output_dir)
+        raw_vertices = int(len(mesh.vertices))
+        raw_faces = int(len(mesh.faces))
+        raw_watertight = bool(mesh.is_watertight)
+
+        self._report_progress(
+            progress_callback, 86, "Optimizing mesh for 3D printing"
+        )
+        print_mesh, print_profile_metadata = self._build_print_ready_mesh(
+            mesh,
+            print_profile=print_profile,
+        )
+
+        self._report_progress(progress_callback, 92, "Exporting mesh artifacts")
+        exports = self._export_meshes(
+            raw_mesh=mesh,
+            print_mesh=print_mesh,
+            base_name=Path(safe_name).stem,
+            output_dir=output_dir,
+        )
 
         metadata = {
             "job_id": output_dir.name,
@@ -138,9 +174,16 @@ class HunyuanV1Service:
             "seed": seed,
             "remove_background_requested": remove_background,
             "remove_background_applied": remove_background_applied,
-            "vertices": int(len(mesh.vertices)),
-            "faces": int(len(mesh.faces)),
-            "watertight": bool(mesh.is_watertight),
+            "print_profile": print_profile_metadata["profile"],
+            "vertices": int(len(print_mesh.vertices)),
+            "faces": int(len(print_mesh.faces)),
+            "watertight": bool(print_mesh.is_watertight),
+            "raw_mesh": {
+                "vertices": raw_vertices,
+                "faces": raw_faces,
+                "watertight": raw_watertight,
+            },
+            "print_mesh": print_profile_metadata,
             "processing_seconds": round(time.time() - started_at, 2),
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "exports": exports,
@@ -157,6 +200,7 @@ class HunyuanV1Service:
         )
 
         self._report_progress(progress_callback, 100, "Generation completed")
+        del print_mesh
         del mesh
         del image
         self._cleanup_gpu()
@@ -196,16 +240,20 @@ class HunyuanV1Service:
             files_to_include.append((stl_path, Path("STL") / stl_path.name))
 
         if include_all:
-            for export_type in ("obj", "glb"):
+            for export_type in ("raw_stl", "obj", "glb"):
                 export_data = generation_result["exports"].get(export_type)
                 if not export_data or not export_data.get("ok"):
                     continue
 
                 export_path = Path(export_data["path"])
+                if export_type == "raw_stl":
+                    archive_root = Path("RAW")
+                else:
+                    archive_root = Path(export_type.upper())
                 files_to_include.append(
                     (
                         export_path,
-                        Path(export_type.upper()) / export_path.name,
+                        archive_root / export_path.name,
                     )
                 )
 
@@ -285,6 +333,7 @@ class HunyuanV1Service:
         (output_dir / "STL").mkdir(parents=True, exist_ok=False)
         (output_dir / "OBJ").mkdir(parents=True, exist_ok=True)
         (output_dir / "GLB").mkdir(parents=True, exist_ok=True)
+        (output_dir / "RAW").mkdir(parents=True, exist_ok=True)
         (output_dir / "processed_image").mkdir(parents=True, exist_ok=True)
         return output_dir
 
@@ -562,22 +611,162 @@ class HunyuanV1Service:
             except Exception:
                 pass
 
-    def _export_mesh(
+    def _build_print_ready_mesh(
         self,
         mesh: Any,
+        *,
+        print_profile: str,
+    ) -> tuple[Any, dict[str, Any]]:
+        print_mesh = mesh.copy()
+        original_faces = int(len(print_mesh.faces))
+        original_vertices = int(len(print_mesh.vertices))
+        profile_name, _profile_config = self._resolve_print_profile(print_profile)
+        target_faces = self._target_print_faces(
+            original_faces,
+            profile_name=profile_name,
+        )
+        operations: list[str] = []
+
+        try:
+            simplified_mesh = self._simplify_with_pymeshlab(
+                mesh=print_mesh,
+                target_faces=target_faces,
+            )
+            if simplified_mesh is not None:
+                print_mesh = simplified_mesh
+                operations.append("quadric_decimation")
+        except Exception as exc:
+            operations.append(f"simplification_skipped:{exc}")
+
+        self._cleanup_mesh(print_mesh)
+
+        return print_mesh, {
+            "profile": profile_name,
+            "vertices": int(len(print_mesh.vertices)),
+            "faces": int(len(print_mesh.faces)),
+            "watertight": bool(print_mesh.is_watertight),
+            "target_faces": target_faces,
+            "reduction_ratio": round(
+                1.0 - (len(print_mesh.faces) / max(1, original_faces)),
+                4,
+            ),
+            "source_vertices": original_vertices,
+            "source_faces": original_faces,
+            "operations": operations,
+        }
+
+    def _resolve_print_profile(
+        self,
+        print_profile: str,
+    ) -> tuple[str, dict[str, float | int]]:
+        normalized = print_profile.strip().lower()
+        if normalized not in self.PRINT_PROFILES:
+            normalized = "balanced"
+        return normalized, self.PRINT_PROFILES[normalized]
+
+    def _target_print_faces(
+        self,
+        original_faces: int,
+        *,
+        profile_name: str,
+    ) -> int:
+        profile = self.PRINT_PROFILES[profile_name]
+        scaled_target = int(original_faces * float(profile["ratio"]))
+        return max(
+            int(profile["min_faces"]),
+            min(int(profile["max_faces"]), scaled_target),
+        )
+
+    def _simplify_with_pymeshlab(
+        self,
+        *,
+        mesh: Any,
+        target_faces: int,
+    ) -> Any | None:
+        if int(len(mesh.faces)) <= target_faces:
+            return mesh.copy()
+
+        import numpy as np
+        import pymeshlab
+        import trimesh
+
+        ms = pymeshlab.MeshSet()
+        ms.add_mesh(
+            pymeshlab.Mesh(
+                vertex_matrix=np.asarray(mesh.vertices, dtype=float),
+                face_matrix=np.asarray(mesh.faces, dtype=int),
+            ),
+            "raw_mesh",
+        )
+
+        try:
+            ms.meshing_remove_unreferenced_vertices()
+        except Exception:
+            pass
+        try:
+            ms.meshing_repair_non_manifold_edges()
+        except Exception:
+            pass
+        try:
+            ms.meshing_repair_non_manifold_vertices()
+        except Exception:
+            pass
+        try:
+            ms.meshing_close_holes(maxholesize=64)
+        except Exception:
+            pass
+
+        ms.meshing_decimation_quadric_edge_collapse(
+            targetfacenum=target_faces,
+            preservenormal=True,
+            preservetopology=True,
+            preserveboundary=True,
+            optimalplacement=True,
+            planarquadric=True,
+            qualitythr=0.4,
+            boundaryweight=1.0,
+        )
+
+        current = ms.current_mesh()
+        simplified = trimesh.Trimesh(
+            vertices=current.vertex_matrix(),
+            faces=current.face_matrix(),
+            process=False,
+        )
+        return simplified
+
+    def _export_meshes(
+        self,
+        *,
+        raw_mesh: Any,
+        print_mesh: Any,
         base_name: str,
         output_dir: Path,
     ) -> dict[str, dict[str, Any]]:
         export_plan = {
-            "stl": output_dir / "STL" / f"{base_name}_Hunyuan3D.stl",
+            "stl": (
+                print_mesh,
+                output_dir / "STL" / f"{base_name}_Hunyuan3D_print_ready.stl",
+            ),
             "obj": output_dir / "OBJ" / f"{base_name}_Hunyuan3D.obj",
             "glb": output_dir / "GLB" / f"{base_name}_Hunyuan3D.glb",
+            "raw_stl": (
+                raw_mesh,
+                output_dir / "RAW" / f"{base_name}_Hunyuan3D_raw.stl",
+            ),
         }
         export_results: dict[str, dict[str, Any]] = {}
 
-        for export_type, path in export_plan.items():
+        for export_type, export_value in export_plan.items():
+            if isinstance(export_value, tuple):
+                export_mesh, path = export_value
+            else:
+                export_mesh = raw_mesh
+                path = export_value
+
             try:
-                mesh.export(str(path), file_type=export_type)
+                file_type = "stl" if export_type == "raw_stl" else export_type
+                export_mesh.export(str(path), file_type=file_type)
                 export_results[export_type] = {
                     "ok": True,
                     "path": str(path),

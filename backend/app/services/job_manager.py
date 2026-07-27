@@ -63,6 +63,7 @@ class HunyuanJobManager:
         filename: str,
         content: bytes,
         preset: str,
+        print_profile: str,
         octree_resolution: int,
         num_inference_steps: int,
         guidance_scale: float,
@@ -83,6 +84,7 @@ class HunyuanJobManager:
             created_at=self._now(),
             params={
                 "preset": preset,
+                "print_profile": print_profile,
                 "octree_resolution": octree_resolution,
                 "num_inference_steps": num_inference_steps,
                 "guidance_scale": guidance_scale,
@@ -233,6 +235,7 @@ class HunyuanJobManager:
                 content=content,
                 job_id=job_id,
                 preset=record.params["preset"],
+                print_profile=record.params.get("print_profile", "balanced"),
                 octree_resolution=record.params["octree_resolution"],
                 num_inference_steps=record.params["num_inference_steps"],
                 guidance_scale=record.params["guidance_scale"],
@@ -367,20 +370,31 @@ class HunyuanJobManager:
             self.generator.outputs_root / record.job_id / f"{record.job_id}_all.zip"
         )
         stl_export = result.get("exports", {}).get("stl", {})
+        raw_stl_export = result.get("exports", {}).get("raw_stl", {})
         obj_export = result.get("exports", {}).get("obj", {})
         glb_export = result.get("exports", {}).get("glb", {})
+        print_mesh = result.get("print_mesh", {})
+        raw_mesh = result.get("raw_mesh", {})
         return {
             "vertices": result.get("vertices"),
             "faces": result.get("faces"),
             "watertight": result.get("watertight"),
             "processing_seconds": result.get("processing_seconds"),
             "preset": record.params.get("preset"),
+            "print_profile": record.params.get("print_profile"),
             "octree_resolution": record.params.get("octree_resolution"),
             "num_inference_steps": record.params.get("num_inference_steps"),
             "guidance_scale": record.params.get("guidance_scale"),
             "stl_size_mb": stl_export.get("size_mb"),
+            "raw_stl_size_mb": raw_stl_export.get("size_mb"),
             "obj_size_mb": obj_export.get("size_mb"),
             "glb_size_mb": glb_export.get("size_mb"),
+            "raw_faces": raw_mesh.get("faces"),
+            "raw_vertices": raw_mesh.get("vertices"),
+            "print_faces": print_mesh.get("faces"),
+            "print_vertices": print_mesh.get("vertices"),
+            "print_target_faces": print_mesh.get("target_faces"),
+            "print_reduction_ratio": print_mesh.get("reduction_ratio"),
             "bundle_size_mb": bundle_size_mb,
             "all_bundle_size_mb": all_bundle_size_mb,
         }

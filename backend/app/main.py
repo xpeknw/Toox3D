@@ -53,6 +53,18 @@ GENERATION_PRESETS = {
     },
 }
 
+PRINT_PROFILES = {
+    "safe": {
+        "description": "Conservative decimation. Keeps more geometry for safer print fidelity.",
+    },
+    "balanced": {
+        "description": "Recommended default. Strong polygon reduction with solid printable detail.",
+    },
+    "aggressive": {
+        "description": "Maximum simplification for lighter STL files and faster slicing.",
+    },
+}
+
 
 def resolve_generation_params(
     *,
@@ -62,6 +74,7 @@ def resolve_generation_params(
     guidance_scale: float | None,
     seed: int,
     remove_background: bool,
+    print_profile: str,
 ) -> dict:
     normalized_preset = preset.strip().lower()
     if normalized_preset not in GENERATION_PRESETS:
@@ -84,8 +97,19 @@ def resolve_generation_params(
     if guidance_scale is not None and guidance_scale <= 0:
         guidance_scale = None
 
+    normalized_print_profile = print_profile.strip().lower()
+    if normalized_print_profile not in PRINT_PROFILES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "print_profile must be one of: "
+                + ", ".join(sorted(PRINT_PROFILES))
+            ),
+        )
+
     return {
         "preset": normalized_preset,
+        "print_profile": normalized_print_profile,
         "octree_resolution": (
             octree_resolution
             if octree_resolution is not None
@@ -113,7 +137,7 @@ def health() -> dict[str, str]:
 
 @app.get("/v2/presets")
 def list_v2_presets() -> dict[str, dict]:
-    return {"presets": GENERATION_PRESETS}
+    return {"presets": GENERATION_PRESETS, "print_profiles": PRINT_PROFILES}
 
 
 @app.post("/v2/jobs")
@@ -125,6 +149,7 @@ async def create_v2_job(
     guidance_scale: float | None = Form(None),
     seed: int = Form(1234),
     remove_background: bool = Form(True),
+    print_profile: str = Form("balanced"),
 ) -> dict:
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
@@ -140,6 +165,7 @@ async def create_v2_job(
         guidance_scale=guidance_scale,
         seed=seed,
         remove_background=remove_background,
+        print_profile=print_profile,
     )
 
     record = job_manager.submit_job(
@@ -234,6 +260,7 @@ async def generate_v1(
     guidance_scale: float | None = Form(None),
     seed: int = Form(1234),
     remove_background: bool = Form(True),
+    print_profile: str = Form("balanced"),
 ):
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
@@ -249,6 +276,7 @@ async def generate_v1(
         guidance_scale=guidance_scale,
         seed=seed,
         remove_background=remove_background,
+        print_profile=print_profile,
     )
 
     try:
