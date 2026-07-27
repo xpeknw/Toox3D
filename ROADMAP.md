@@ -48,6 +48,10 @@ Phase 1 — Create the repository foundation
 
 Status: next task.
 
+For the current validation phase, assume the repository is publicly readable
+and cloned over HTTPS. Private repository authentication should be treated as a
+later pre-bootstrap concern, not part of bootstrap.sh itself.
+
 Create the initial repository:
 
 toox-3d/

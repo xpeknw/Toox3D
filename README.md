@@ -92,11 +92,14 @@ docker compose down
 
 ## Fresh Ubuntu 22.04 VM
 
+For the current validation phase, the repository is assumed to be publicly
+readable and cloned over HTTPS.
+
 Target flow:
 
 ```bash
-git clone <repository-url> toox-3d
-cd toox-3d
+git clone https://github.com/xpeknw/Toox3D.git
+cd Toox3D
 ./bootstrap.sh
 docker compose up --build
 ```
@@ -115,3 +118,6 @@ docker compose ps
 
 - `models/` and `outputs/` are intentionally kept out of Git.
 - Hunyuan integration comes after infrastructure, Docker, and GPU validation.
+- Private repository authentication is intentionally out of scope for this
+  milestone. If the repository becomes private later, authentication should be
+  handled as a separate pre-bootstrap step.

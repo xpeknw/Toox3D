@@ -100,11 +100,18 @@ Any command needed to prepare a fresh server must eventually be placed in script
 
 The desired installation flow is:
 
-git clone <repository-url>
-cd toox-3d
+git clone https://github.com/xpeknw/Toox3D.git
+cd Toox3D
 ./bootstrap.sh
 
 The script should prepare the server without requiring the developer to remember the previous manual steps.
+
+For the current validation phase, the repository may remain public so a fresh
+server can clone it over HTTPS without SSH keys, GitHub CLI authentication or
+tokens.
+
+If the repository becomes private later, repository authentication must be
+handled as a separate step before running bootstrap.sh.
 
 Immediate objective
 
@@ -440,8 +447,8 @@ Definition of done for the current milestone
 
 The current milestone is complete when a fresh supported Ubuntu GPU VM can run:
 
-git clone <repository-url>
-cd toox-3d
+git clone https://github.com/xpeknw/Toox3D.git
+cd Toox3D
 ./bootstrap.sh
 docker compose up
 
