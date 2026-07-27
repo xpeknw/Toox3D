@@ -22,6 +22,23 @@ run_privileged() {
   fi
 }
 
+wait_for_apt_lock() {
+  local attempts=60
+  local sleep_seconds=5
+  local lock_path="/var/lib/dpkg/lock-frontend"
+
+  for ((i=1; i<=attempts; i++)); do
+    if ! run_privileged fuser "$lock_path" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    log "Waiting for apt/dpkg lock (${i}/${attempts})..."
+    sleep "$sleep_seconds"
+  done
+
+  die "Timed out waiting for apt/dpkg lock to be released."
+}
+
 require_linux() {
   if [[ "$(uname -s)" != "Linux" ]]; then
     die "This bootstrap script only supports Linux."
@@ -48,8 +65,12 @@ check_ubuntu() {
 }
 
 ensure_apt_packages() {
+  wait_for_apt_lock
+
   log "Refreshing apt indexes"
   run_privileged apt-get update -y
+
+  wait_for_apt_lock
 
   log "Installing base packages"
   run_privileged apt-get install -y \
