@@ -1,6 +1,7 @@
 import gc
 import io
 import json
+import math
 import os
 import subprocess
 import sys
@@ -84,6 +85,13 @@ class HunyuanV1Service:
         generator = torch.Generator(device="cuda").manual_seed(seed)
 
         self._report_progress(progress_callback, 45, "Generating 3D mesh")
+        progress_stop_event = threading.Event()
+        progress_thread = self._start_generation_progress_thread(
+            progress_callback=progress_callback,
+            stop_event=progress_stop_event,
+            octree_resolution=octree_resolution,
+            num_inference_steps=num_inference_steps,
+        )
         try:
             with torch.inference_mode():
                 result = pipeline(
@@ -101,6 +109,10 @@ class HunyuanV1Service:
                     "reduce octree_resolution to 384."
                 ) from exc
             raise
+        finally:
+            progress_stop_event.set()
+            if progress_thread is not None:
+                progress_thread.join(timeout=0.2)
 
         mesh = result[0]
         if mesh is None:
@@ -314,6 +326,59 @@ class HunyuanV1Service:
             return
 
         progress_callback(percent, message)
+
+    def _start_generation_progress_thread(
+        self,
+        *,
+        progress_callback: Callable[[int, str], None] | None,
+        stop_event: threading.Event,
+        octree_resolution: int,
+        num_inference_steps: int,
+    ) -> threading.Thread | None:
+        if progress_callback is None:
+            return None
+
+        estimated_seconds = self._estimate_generation_seconds(
+            octree_resolution=octree_resolution,
+            num_inference_steps=num_inference_steps,
+        )
+        start_percent = 45
+        end_percent = 78
+        tick_seconds = 2.5
+        total_ticks = max(1, math.ceil(estimated_seconds / tick_seconds))
+
+        def _runner() -> None:
+            for tick in range(1, total_ticks + 1):
+                if stop_event.wait(tick_seconds):
+                    return
+
+                fraction = min(1.0, tick / total_ticks)
+                percent = start_percent + round(
+                    (end_percent - start_percent) * fraction
+                )
+                progress_callback(
+                    percent,
+                    "Generating 3D mesh",
+                )
+
+        thread = threading.Thread(
+            target=_runner,
+            name="toox3d-progress-smoother",
+            daemon=True,
+        )
+        thread.start()
+        return thread
+
+    def _estimate_generation_seconds(
+        self,
+        *,
+        octree_resolution: int,
+        num_inference_steps: int,
+    ) -> float:
+        base_seconds = 40.0
+        step_factor = max(0, num_inference_steps - 30) * 1.8
+        resolution_factor = max(0, octree_resolution - 384) * 0.22
+        return max(25.0, base_seconds + step_factor + resolution_factor)
 
     def _detect_useful_alpha(self, image: Any) -> bool:
         if image.mode not in ("RGBA", "LA"):

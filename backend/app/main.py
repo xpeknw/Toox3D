@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from backend.app.services.job_manager import manager as job_manager
@@ -12,6 +14,23 @@ from backend.app.services.hunyuan_v1 import (
 
 
 app = FastAPI(title="Toox 3D")
+
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "TOOX_CORS_ORIGINS",
+        "http://127.0.0.1:4200,http://localhost:4200",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 GENERATION_PRESETS = {
     "v1-stable": {
@@ -148,6 +167,62 @@ def get_v2_job(job_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return job_manager.serialize_job(record)
+
+
+@app.post("/v2/jobs/{job_id}/cancel")
+def cancel_v2_job(job_id: str) -> dict:
+    try:
+        record = job_manager.cancel_job(job_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return job_manager.serialize_job(record)
+
+
+@app.delete("/v2/jobs/{job_id}")
+def delete_v2_job(job_id: str) -> dict[str, str]:
+    try:
+        job_manager.delete_job(job_id, delete_outputs=True)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"status": "deleted", "job_id": job_id}
+
+
+@app.post("/v2/jobs/cleanup")
+def cleanup_v2_jobs(
+    older_than_hours: int = Form(24),
+    statuses: str = Form("completed,failed,cancelled"),
+) -> dict[str, object]:
+    normalized_statuses = {
+        item.strip().lower()
+        for item in statuses.split(",")
+        if item.strip()
+    }
+    valid_statuses = {
+        "completed",
+        "failed",
+        "cancelled",
+        "queued",
+    }
+    invalid_statuses = sorted(normalized_statuses - valid_statuses)
+    if invalid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid statuses for cleanup: "
+                + ", ".join(invalid_statuses)
+            ),
+        )
+
+    return job_manager.cleanup_jobs(
+        older_than_hours=older_than_hours,
+        statuses=normalized_statuses,
+    )
 
 
 @app.post("/generate-v1", response_model=None)

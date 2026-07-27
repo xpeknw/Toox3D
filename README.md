@@ -200,9 +200,18 @@ Typical response:
   "status": "queued",
   "progress_percent": 0,
   "progress_message": "Queued",
+  "effective_params": {
+    "preset": "high",
+    "octree_resolution": 512,
+    "num_inference_steps": 30,
+    "guidance_scale": 5.5,
+    "seed": 1234,
+    "remove_background": true
+  },
   "status_url": "/v2/jobs/pieza_20260727_123456_ab12cd34",
   "timing": {
     "average_completed_job_seconds": 120.0,
+    "timing_basis_preset": "high",
     "queue_position": 1,
     "estimated_wait_seconds": 0.0,
     "estimated_total_seconds": 120.0
@@ -213,6 +222,9 @@ Typical response:
   }
 }
 ```
+
+Completed jobs also include a `result_summary` with practical output metrics such
+as STL/OBJ/GLB size, bundle size, vertices, faces, and actual processing time.
 
 Built-in presets:
 
@@ -240,6 +252,26 @@ Download when the job reaches `completed`:
 ```bash
 curl -L "http://127.0.0.1:8011/downloads/<job-id>/bundle" \
   --output modelo_bundle.zip
+```
+
+Cancel a queued job:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/v2/jobs/<job-id>/cancel"
+```
+
+Delete a completed, failed, or cancelled job and its outputs:
+
+```bash
+curl -X DELETE "http://127.0.0.1:8011/v2/jobs/<job-id>"
+```
+
+Cleanup old jobs in bulk:
+
+```bash
+curl -X POST "http://127.0.0.1:8011/v2/jobs/cleanup" \
+  -F "older_than_hours=24" \
+  -F "statuses=completed,failed,cancelled"
 ```
 
 ## Fresh Ubuntu 22.04 VM

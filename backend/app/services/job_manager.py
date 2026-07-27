@@ -18,6 +18,7 @@ JOB_STATUS_QUEUED = "queued"
 JOB_STATUS_RUNNING = "running"
 JOB_STATUS_COMPLETED = "completed"
 JOB_STATUS_FAILED = "failed"
+JOB_STATUS_CANCELLED = "cancelled"
 
 
 @dataclass
@@ -119,10 +120,78 @@ class HunyuanJobManager:
             )
         return jobs[:limit]
 
+    def cancel_job(self, job_id: str) -> JobRecord:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                raise FileNotFoundError("Job not found.")
+            if record.status != JOB_STATUS_QUEUED:
+                raise ValueError("Only queued jobs can be cancelled.")
+
+            record.status = JOB_STATUS_CANCELLED
+            record.progress_message = "Cancelled"
+            record.error = "Cancelled by user."
+            record.completed_at = self._now()
+            self._persist_job(record)
+
+        payload_path = self.jobs_dir / f"{job_id}.input"
+        payload_path.unlink(missing_ok=True)
+        return record
+
+    def delete_job(self, job_id: str, *, delete_outputs: bool = True) -> None:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                raise FileNotFoundError("Job not found.")
+            if record.status == JOB_STATUS_RUNNING:
+                raise ValueError("Running jobs cannot be deleted.")
+            del self._jobs[job_id]
+
+        (self.jobs_dir / f"{job_id}.json").unlink(missing_ok=True)
+        (self.jobs_dir / f"{job_id}.input").unlink(missing_ok=True)
+
+        if delete_outputs:
+            output_dir = self.generator.outputs_root / job_id
+            self._remove_tree(output_dir)
+
+    def cleanup_jobs(
+        self,
+        *,
+        older_than_hours: int | None = None,
+        statuses: set[str] | None = None,
+    ) -> dict[str, Any]:
+        now_ts = time.time()
+        deleted: list[str] = []
+
+        with self._lock:
+            candidates = list(self._jobs.values())
+
+        for record in candidates:
+            if statuses and record.status not in statuses:
+                continue
+
+            if older_than_hours is not None:
+                reference = record.completed_at or record.created_at
+                record_ts = self._parse_timestamp(reference)
+                if record_ts is None:
+                    continue
+                age_hours = (now_ts - record_ts) / 3600
+                if age_hours < older_than_hours:
+                    continue
+
+            try:
+                self.delete_job(record.job_id, delete_outputs=True)
+                deleted.append(record.job_id)
+            except ValueError:
+                continue
+
+        return {"deleted_job_ids": deleted, "deleted_count": len(deleted)}
+
     def serialize_job(self, record: JobRecord) -> dict[str, Any]:
         payload = asdict(record)
         payload["status_url"] = f"/v2/jobs/{record.job_id}"
         payload["download_ready"] = record.status == JOB_STATUS_COMPLETED
+        payload["effective_params"] = dict(record.params)
         payload["timing"] = self._build_timing_payload(record)
         payload["result_summary"] = self._build_result_summary(record)
         return payload
@@ -137,6 +206,8 @@ class HunyuanJobManager:
 
     def _run_job(self, job_id: str) -> None:
         record = self.get_job(job_id)
+        if record.status == JOB_STATUS_CANCELLED:
+            return
         payload_path = self.jobs_dir / f"{job_id}.input"
         if not payload_path.exists():
             self._mark_failed(job_id, "Input payload is missing.")
@@ -245,9 +316,12 @@ class HunyuanJobManager:
         return time.strftime("%Y-%m-%d %H:%M:%S")
 
     def _build_timing_payload(self, record: JobRecord) -> dict[str, Any]:
-        average_seconds = self._average_completed_job_seconds()
+        average_seconds = self._average_completed_job_seconds(
+            preset=record.params.get("preset")
+        )
         payload: dict[str, Any] = {
             "average_completed_job_seconds": average_seconds,
+            "timing_basis_preset": record.params.get("preset"),
         }
 
         if record.status == JOB_STATUS_QUEUED:
@@ -276,6 +350,8 @@ class HunyuanJobManager:
             payload["actual_processing_seconds"] = record.result.get(
                 "processing_seconds"
             )
+        elif record.status in {JOB_STATUS_FAILED, JOB_STATUS_CANCELLED}:
+            payload["estimated_remaining_seconds"] = 0.0
 
         return payload
 
@@ -284,23 +360,45 @@ class HunyuanJobManager:
             return None
 
         result = record.result
+        bundle_size_mb = self._file_size_mb(
+            self.generator.outputs_root / record.job_id / f"{record.job_id}_bundle.zip"
+        )
+        all_bundle_size_mb = self._file_size_mb(
+            self.generator.outputs_root / record.job_id / f"{record.job_id}_all.zip"
+        )
+        stl_export = result.get("exports", {}).get("stl", {})
+        obj_export = result.get("exports", {}).get("obj", {})
+        glb_export = result.get("exports", {}).get("glb", {})
         return {
             "vertices": result.get("vertices"),
             "faces": result.get("faces"),
             "watertight": result.get("watertight"),
             "processing_seconds": result.get("processing_seconds"),
             "preset": record.params.get("preset"),
+            "octree_resolution": record.params.get("octree_resolution"),
+            "num_inference_steps": record.params.get("num_inference_steps"),
+            "guidance_scale": record.params.get("guidance_scale"),
+            "stl_size_mb": stl_export.get("size_mb"),
+            "obj_size_mb": obj_export.get("size_mb"),
+            "glb_size_mb": glb_export.get("size_mb"),
+            "bundle_size_mb": bundle_size_mb,
+            "all_bundle_size_mb": all_bundle_size_mb,
         }
 
-    def _average_completed_job_seconds(self) -> float:
+    def _average_completed_job_seconds(self, preset: str | None = None) -> float:
         completed_seconds: list[float] = []
         for record in self._jobs.values():
             if record.status != JOB_STATUS_COMPLETED or record.result is None:
+                continue
+            if preset is not None and record.params.get("preset") != preset:
                 continue
 
             seconds = record.result.get("processing_seconds")
             if isinstance(seconds, (int, float)) and seconds > 0:
                 completed_seconds.append(float(seconds))
+
+        if not completed_seconds and preset is not None:
+            return self._average_completed_job_seconds(preset=None)
 
         if not completed_seconds:
             return 120.0
@@ -340,6 +438,31 @@ class HunyuanJobManager:
         completed_fraction = progress / 100.0
         estimated_elapsed = estimated_total * completed_fraction
         return max(0.0, estimated_total - estimated_elapsed)
+
+    def _remove_tree(self, path: Path) -> None:
+        if not path.exists():
+            return
+
+        for child in sorted(path.rglob("*"), reverse=True):
+            if child.is_file() or child.is_symlink():
+                child.unlink(missing_ok=True)
+            elif child.is_dir():
+                child.rmdir()
+        if path.is_dir():
+            path.rmdir()
+
+    def _parse_timestamp(self, value: str | None) -> float | None:
+        if not value:
+            return None
+        try:
+            return time.mktime(time.strptime(value, "%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            return None
+
+    def _file_size_mb(self, path: Path) -> float | None:
+        if not path.exists() or not path.is_file():
+            return None
+        return round(path.stat().st_size / 1024**2, 2)
 
 
 manager = HunyuanJobManager(hunyuan_v1_service)
