@@ -41,6 +41,24 @@ class HunyuanV1Service:
             "max_faces": 32000,
         },
     }
+    PYMESHLAB_FILTER_ALIASES = {
+        "meshing_decimation_quadric_edge_collapse": [
+            "meshing_decimation_quadric_edge_collapse",
+            "simplification_quadric_edge_collapse_decimation",
+        ],
+        "meshing_decimation_edge_collapse_for_marching_cube_meshes": [
+            "meshing_decimation_edge_collapse_for_marching_cube_meshes",
+            "simplification_edge_collapse_for_marching_cube_meshes",
+        ],
+        "meshing_isotropic_explicit_remeshing": [
+            "meshing_isotropic_explicit_remeshing",
+            "remeshing_isotropic_explicit_remeshing",
+        ],
+        "apply_coord_taubin_smoothing": [
+            "apply_coord_taubin_smoothing",
+            "taubin_smooth",
+        ],
+    }
 
     def __init__(self) -> None:
         self.project_root = Path(__file__).resolve().parents[3]
@@ -888,16 +906,27 @@ class HunyuanV1Service:
         filter_name: str,
         **kwargs: Any,
     ) -> Any:
-        method = getattr(meshset, filter_name, None)
-        if callable(method):
-            return method(**kwargs)
+        aliases = self.PYMESHLAB_FILTER_ALIASES.get(filter_name, [filter_name])
+        last_error: Exception | None = None
 
-        apply_filter = getattr(meshset, "apply_filter", None)
-        if callable(apply_filter):
-            return apply_filter(filter_name, **kwargs)
+        for candidate in aliases:
+            method = getattr(meshset, candidate, None)
+            if callable(method):
+                return method(**kwargs)
+
+            apply_filter = getattr(meshset, "apply_filter", None)
+            if callable(apply_filter):
+                try:
+                    return apply_filter(candidate, **kwargs)
+                except Exception as exc:
+                    last_error = exc
+                    continue
+
+        if last_error is not None:
+            raise last_error
 
         raise AttributeError(
-            f"MeshSet does not support '{filter_name}' or apply_filter()."
+            f"MeshSet does not support filters {aliases} or apply_filter()."
         )
 
     def _meshset_to_trimesh(self, ms: Any, trimesh_module: Any) -> Any:
