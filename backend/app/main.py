@@ -5,15 +5,11 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.app.services.image_job_manager import manager as image_job_manager
 from backend.app.services.job_manager import manager as job_manager
 from backend.app.services.hunyuan_v1 import (
     CudaUnavailableError,
     MeshGenerationError,
     service as hunyuan_v1_service,
-)
-from backend.app.services.flux_image_service import (
-    service as flux_image_service,
 )
 
 
@@ -142,103 +138,6 @@ def health() -> dict[str, str]:
 @app.get("/v2/presets")
 def list_v2_presets() -> dict[str, dict]:
     return {"presets": GENERATION_PRESETS, "print_profiles": PRINT_PROFILES}
-
-
-@app.post("/v2/images/jobs")
-def create_image_job(
-    prompt: str = Form(...),
-    negative_prompt: str | None = Form(None),
-    num_images: int = Form(4),
-    width: int = Form(1024),
-    height: int = Form(1024),
-    seed: int = Form(1234),
-    num_inference_steps: int = Form(4),
-    guidance_scale: float = Form(0.0),
-) -> dict:
-    normalized_prompt = prompt.strip()
-    if not normalized_prompt:
-        raise HTTPException(status_code=400, detail="Prompt is required.")
-
-    record = image_job_manager.submit_job(
-        prompt=normalized_prompt,
-        negative_prompt=negative_prompt.strip() if negative_prompt else None,
-        num_images=max(1, min(4, num_images)),
-        width=width,
-        height=height,
-        seed=seed,
-        num_inference_steps=max(1, num_inference_steps),
-        guidance_scale=guidance_scale,
-    )
-    return image_job_manager.serialize_job(record)
-
-
-@app.get("/v2/images/jobs")
-def list_image_jobs(limit: int = 20) -> dict[str, list[dict]]:
-    jobs = [
-        image_job_manager.serialize_job(record)
-        for record in image_job_manager.list_jobs(limit=limit)
-    ]
-    return {"jobs": jobs}
-
-
-@app.get("/v2/images/jobs/{job_id}")
-def get_image_job(job_id: str) -> dict:
-    try:
-        record = image_job_manager.get_job(job_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    return image_job_manager.serialize_job(record)
-
-
-@app.delete("/v2/images/jobs/{job_id}")
-def delete_image_job(job_id: str) -> dict[str, str]:
-    try:
-        image_job_manager.delete_job(job_id, delete_outputs=True)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    return {"status": "deleted", "job_id": job_id}
-
-
-@app.post("/v2/images/jobs/{job_id}/to-3d")
-def promote_generated_image_to_3d(
-    job_id: str,
-    image_index: int = Form(0),
-    preset: str = Form("v1-stable"),
-    octree_resolution: int | None = Form(None),
-    num_inference_steps: int | None = Form(None),
-    guidance_scale: float | None = Form(None),
-    seed: int = Form(1234),
-    remove_background: bool = Form(True),
-    print_profile: str = Form("balanced"),
-) -> dict:
-    try:
-        image_filename, content = flux_image_service.load_generated_image_bytes(
-            job_id=job_id,
-            image_index=image_index,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    resolved = resolve_generation_params(
-        preset=preset,
-        octree_resolution=octree_resolution,
-        num_inference_steps=num_inference_steps,
-        guidance_scale=guidance_scale,
-        seed=seed,
-        remove_background=remove_background,
-        print_profile=print_profile,
-    )
-
-    record = job_manager.submit_job(
-        filename=image_filename,
-        content=content,
-        **resolved,
-    )
-    return job_manager.serialize_job(record)
 
 
 @app.post("/v2/jobs")
