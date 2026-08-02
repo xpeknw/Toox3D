@@ -12,6 +12,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from backend.app.services.gpu_runtime import GPU_GENERATION_LOCK
+
 
 class CudaUnavailableError(RuntimeError):
     pass
@@ -45,6 +47,10 @@ class HunyuanV1Service:
         "meshing_decimation_quadric_edge_collapse": [
             "meshing_decimation_quadric_edge_collapse",
             "simplification_quadric_edge_collapse_decimation",
+        ],
+        "meshing_decimation_clustering": [
+            "meshing_decimation_clustering",
+            "simplification_clustering_decimation",
         ],
         "meshing_decimation_edge_collapse_for_marching_cube_meshes": [
             "meshing_decimation_edge_collapse_for_marching_cube_meshes",
@@ -129,14 +135,15 @@ class HunyuanV1Service:
             num_inference_steps=num_inference_steps,
         )
         try:
-            with torch.inference_mode():
-                result = pipeline(
-                    image=image,
-                    num_inference_steps=num_inference_steps,
-                    guidance_scale=guidance_scale,
-                    generator=generator,
-                    octree_resolution=octree_resolution,
-                )
+            with GPU_GENERATION_LOCK:
+                with torch.inference_mode():
+                    result = pipeline(
+                        image=image,
+                        num_inference_steps=num_inference_steps,
+                        guidance_scale=guidance_scale,
+                        generator=generator,
+                        octree_resolution=octree_resolution,
+                    )
         except ValueError as exc:
             if "Input array must be at le" in str(exc):
                 raise MeshGenerationError(
@@ -679,6 +686,18 @@ class HunyuanV1Service:
                 )
 
             if int(len(print_mesh.faces)) >= int(original_faces * 0.98):
+                clustering_mesh = self._decimate_with_clustering(
+                    mesh=print_mesh,
+                    profile_name=profile_name,
+                )
+                if clustering_mesh is not None:
+                    before_cluster_faces = len(print_mesh.faces)
+                    print_mesh = clustering_mesh
+                    operations.append(
+                        f"cluster_decimate:{before_cluster_faces}->{len(print_mesh.faces)}"
+                    )
+
+            if int(len(print_mesh.faces)) >= int(original_faces * 0.98):
                 fallback_mesh = self._decimate_with_pymeshlab(
                     mesh=print_mesh,
                     target_faces=target_faces,
@@ -701,6 +720,12 @@ class HunyuanV1Service:
                 operations.append(f"smooth:{len(print_mesh.faces)}")
         except Exception as exc:
             operations.append(f"simplification_skipped:{exc}")
+            available_filters = self._safe_list_pymeshlab_filters()
+            if available_filters:
+                operations.append(
+                    "available_filters:"
+                    + ",".join(sorted(available_filters)[:18])
+                )
 
         if int(len(print_mesh.faces)) >= int(original_faces * 0.98):
             operations.append("reduction_warning:no_meaningful_reduction")
@@ -865,6 +890,33 @@ class HunyuanV1Service:
         )
         return self._meshset_to_trimesh(ms, trimesh)
 
+    def _decimate_with_clustering(
+        self,
+        *,
+        mesh: Any,
+        profile_name: str,
+    ) -> Any | None:
+        ms, pymeshlab, trimesh = self._make_meshset(mesh)
+
+        threshold_map = {
+            "safe": 0.4,
+            "balanced": 0.8,
+            "aggressive": 1.4,
+        }
+
+        try:
+            self._run_pymeshlab_filter(
+                ms,
+                "meshing_decimation_clustering",
+                threshold=pymeshlab.PercentageValue(
+                    threshold_map.get(profile_name, 0.8)
+                ),
+            )
+        except Exception:
+            return None
+
+        return self._meshset_to_trimesh(ms, trimesh)
+
     def _smooth_with_pymeshlab(
         self,
         *,
@@ -928,6 +980,18 @@ class HunyuanV1Service:
         raise AttributeError(
             f"MeshSet does not support filters {aliases} or apply_filter()."
         )
+
+    def _safe_list_pymeshlab_filters(self) -> list[str]:
+        try:
+            import pymeshlab
+
+            filters = pymeshlab.filter_list()
+            if isinstance(filters, list):
+                return [str(item) for item in filters]
+        except Exception:
+            return []
+
+        return []
 
     def _meshset_to_trimesh(self, ms: Any, trimesh_module: Any) -> Any:
         current = ms.current_mesh()
