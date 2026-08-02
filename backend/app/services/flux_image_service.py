@@ -14,7 +14,7 @@ from backend.app.services.hunyuan_v1 import CudaUnavailableError
 class FluxImageService:
     MODEL_ID = os.environ.get(
         "TOOX_IMAGE_MODEL_ID",
-        "black-forest-labs/FLUX.1-schnell",
+        "stabilityai/sdxl-turbo",
     )
 
     def __init__(self) -> None:
@@ -26,6 +26,11 @@ class FluxImageService:
             os.environ.get("TOOX_OUTPUTS_DIR", "./outputs")
         )
         self.hf_cache_dir = self.models_root / "huggingface"
+        self.hf_token = (
+            os.environ.get("TOOX_HF_TOKEN")
+            or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+            or os.environ.get("HF_TOKEN")
+        )
         self._pipeline = None
         self._torch = None
 
@@ -60,19 +65,24 @@ class FluxImageService:
 
         generator_device = "cpu"
         generator = torch.Generator(generator_device).manual_seed(seed)
+        pipeline_kwargs = {
+            "prompt": prompt,
+            "guidance_scale": guidance_scale,
+            "num_inference_steps": safe_steps,
+            "width": safe_width,
+            "height": safe_height,
+            "num_images_per_prompt": safe_num_images,
+            "generator": generator,
+        }
+
+        if self._is_flux_model():
+            pipeline_kwargs["max_sequence_length"] = 256
+        elif negative_prompt:
+            pipeline_kwargs["negative_prompt"] = negative_prompt
 
         self._report(progress_callback, 44, "Generating images")
         with GPU_GENERATION_LOCK:
-            result = pipeline(
-                prompt=prompt,
-                guidance_scale=guidance_scale,
-                num_inference_steps=safe_steps,
-                width=safe_width,
-                height=safe_height,
-                num_images_per_prompt=safe_num_images,
-                generator=generator,
-                max_sequence_length=256,
-            )
+            result = pipeline(**pipeline_kwargs)
 
         saved_images: list[dict[str, Any]] = []
         self._report(progress_callback, 82, "Saving generated images")
@@ -175,7 +185,7 @@ class FluxImageService:
         if self._pipeline is not None:
             return self._pipeline
 
-        from diffusers import FluxPipeline
+        from diffusers import AutoPipelineForText2Image
 
         torch = self._ensure_torch()
         self.hf_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -189,13 +199,33 @@ class FluxImageService:
             raise CudaUnavailableError("PyTorch did not detect CUDA for image generation.")
 
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-        pipeline = FluxPipeline.from_pretrained(
-            self.MODEL_ID,
-            torch_dtype=dtype,
-        )
-        pipeline.enable_model_cpu_offload()
+        try:
+            pipeline = AutoPipelineForText2Image.from_pretrained(
+                self.MODEL_ID,
+                torch_dtype=dtype,
+                token=self.hf_token,
+                use_safetensors=True,
+            )
+        except Exception as exc:
+            message = str(exc)
+            if "401" in message or "gated repo" in message.lower():
+                raise RuntimeError(
+                    "Selected image model is gated in Hugging Face. "
+                    "Set TOOX_HF_TOKEN for authenticated access or switch "
+                    "TOOX_IMAGE_MODEL_ID to a public model such as "
+                    "'stabilityai/sdxl-turbo'."
+                ) from exc
+            raise
+
+        if hasattr(pipeline, "enable_model_cpu_offload"):
+            pipeline.enable_model_cpu_offload()
+        else:
+            pipeline.to("cuda")
         self._pipeline = pipeline
         return self._pipeline
+
+    def _is_flux_model(self) -> bool:
+        return "flux" in self.MODEL_ID.lower()
 
     def _ensure_torch(self):
         if self._torch is not None:
