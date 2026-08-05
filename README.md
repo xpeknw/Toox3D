@@ -66,7 +66,8 @@ You can also pass them directly to avoid interactive prompts:
 ./bootstrap.sh \
   --port 8011 \
   --ssh-port 27608 \
-  --ssh-host 151.237.25.234
+  --ssh-host 151.237.25.234 \
+  --install-trellis
 ```
 
 If you pass any of those values, bootstrap skips the interactive questions and
@@ -88,8 +89,19 @@ The bootstrap script also:
 - aborts on the next run if NVIDIA is still unavailable, so you can destroy the instance
 - predownloads the background-removal model (`u2net.onnx`)
 - preloads the Hunyuan repo and weights on GPU hosts
+- optionally installs TRELLIS in `models/trellis-venv`
+- optionally preloads TRELLIS weights when `TOOX_INSTALL_TRELLIS=1`
 - starts `uvicorn` automatically on the configured port
 - writes the API log to `logs/uvicorn.log`
+
+If you want TRELLIS available in the engine selector, bootstrap must install it:
+
+```bash
+./bootstrap.sh --install-trellis
+```
+
+That keeps TRELLIS isolated from the main Hunyuan runtime by using a separate
+virtual environment at `models/trellis-venv`.
 
 ## Local development
 

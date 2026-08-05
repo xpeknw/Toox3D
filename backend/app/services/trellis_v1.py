@@ -19,6 +19,9 @@ class TrellisV1Service(HunyuanV1Service):
         super().__init__()
         self.vendor_repo_dir = self.models_root / "trellis-repo"
         self.hf_cache_dir = self.models_root / "huggingface_trellis"
+        self.runtime_venv_dir = self._resolve_path(
+            os.environ.get("TOOX_TRELLIS_VENV", "./models/trellis-venv")
+        )
 
     def generate(
         self,
@@ -190,6 +193,7 @@ class TrellisV1Service(HunyuanV1Service):
 
             self._ensure_repo()
             self._ensure_repo_in_syspath()
+            self._ensure_runtime_site_packages()
             os.environ["HF_HOME"] = str(self.hf_cache_dir)
             os.environ.setdefault("SPCONV_ALGO", "native")
 
@@ -238,6 +242,16 @@ class TrellisV1Service(HunyuanV1Service):
         repo_path = str(self.vendor_repo_dir)
         if repo_path not in os.sys.path:
             os.sys.path.insert(0, repo_path)
+
+    def _ensure_runtime_site_packages(self) -> None:
+        lib_dir = self.runtime_venv_dir / "lib"
+        if not lib_dir.is_dir():
+            return
+
+        for site_packages in sorted(lib_dir.glob("python*/site-packages")):
+            site_packages_str = str(site_packages)
+            if site_packages_str not in os.sys.path:
+                os.sys.path.insert(0, site_packages_str)
 
     def _convert_trellis_mesh(self, mesh: Any) -> Any:
         import numpy as np

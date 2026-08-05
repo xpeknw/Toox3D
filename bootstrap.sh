@@ -12,6 +12,7 @@ CLI_TOOX_PORT=""
 CLI_LOCAL_TUNNEL_PORT=""
 CLI_SSH_PORT=""
 CLI_SSH_HOST=""
+CLI_INSTALL_TRELLIS=""
 CLI_NO_PROMPT="0"
 
 log() {
@@ -33,6 +34,7 @@ Options:
   --local-port <value>    Local SSH tunnel port on your Mac (defaults to --port)
   --ssh-port <value>      Vast.ai SSH port
   --ssh-host <value>      Vast.ai public IP or hostname
+  --install-trellis       Install TRELLIS runtime during bootstrap
   --no-prompt             Do not ask interactive questions
   --help                  Show this help
 EOF
@@ -60,6 +62,10 @@ parse_args() {
         [[ $# -ge 2 ]] || die "--ssh-host requires a value"
         CLI_SSH_HOST="$2"
         shift 2
+        ;;
+      --install-trellis)
+        CLI_INSTALL_TRELLIS="1"
+        shift
         ;;
       --no-prompt)
         CLI_NO_PROMPT="1"
@@ -343,21 +349,23 @@ prompt_value() {
 }
 
 configure_runtime_values() {
-  local current_port current_local_port current_ssh_port current_ssh_host
-  local toox_port local_tunnel_port ssh_port ssh_host
+  local current_port current_local_port current_ssh_port current_ssh_host current_install_trellis
+  local toox_port local_tunnel_port ssh_port ssh_host install_trellis
   local cli_values_supplied="0"
 
   current_port="$(get_env_value "TOOX_PORT" "8011")"
   current_local_port="$(get_env_value "TOOX_LOCAL_TUNNEL_PORT" "$current_port")"
   current_ssh_port="$(get_env_value "TOOX_SSH_PORT" "")"
   current_ssh_host="$(get_env_value "TOOX_SSH_HOST" "")"
+  current_install_trellis="$(get_env_value "TOOX_INSTALL_TRELLIS" "0")"
 
   toox_port="${CLI_TOOX_PORT:-}"
   local_tunnel_port="${CLI_LOCAL_TUNNEL_PORT:-}"
   ssh_port="${CLI_SSH_PORT:-}"
   ssh_host="${CLI_SSH_HOST:-}"
+  install_trellis="${CLI_INSTALL_TRELLIS:-}"
 
-  if [[ -n "$toox_port" || -n "$local_tunnel_port" || -n "$ssh_port" || -n "$ssh_host" ]]; then
+  if [[ -n "$toox_port" || -n "$local_tunnel_port" || -n "$ssh_port" || -n "$ssh_host" || -n "$install_trellis" ]]; then
     cli_values_supplied="1"
   fi
 
@@ -370,23 +378,28 @@ configure_runtime_values() {
     [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$toox_port"
     [[ -n "$ssh_port" ]] || ssh_port="$current_ssh_port"
     [[ -n "$ssh_host" ]] || ssh_host="$current_ssh_host"
+    [[ -n "$install_trellis" ]] || install_trellis="$current_install_trellis"
   elif [[ -t 0 ]]; then
     log "Configure server and tunnel values"
     [[ -n "$toox_port" ]] || toox_port="$(prompt_value "FastAPI port on the server" "$current_port")"
     [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$(prompt_value "Local port on your Mac for the SSH tunnel" "$toox_port")"
     [[ -n "$ssh_port" ]] || ssh_port="$(prompt_value "Vast.ai SSH port (leave blank if not needed now)" "$current_ssh_port")"
     [[ -n "$ssh_host" ]] || ssh_host="$(prompt_value "Vast.ai public IP or hostname (leave blank if not needed now)" "$current_ssh_host")"
+    [[ -n "$install_trellis" ]] || install_trellis="$(prompt_value "Install TRELLIS runtime too? (0/1)" "$current_install_trellis")"
   else
     [[ -n "$toox_port" ]] || toox_port="$current_port"
     [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$toox_port"
     [[ -n "$ssh_port" ]] || ssh_port="$current_ssh_port"
     [[ -n "$ssh_host" ]] || ssh_host="$current_ssh_host"
+    [[ -n "$install_trellis" ]] || install_trellis="$current_install_trellis"
   fi
 
   set_env_value "TOOX_PORT" "$toox_port"
   set_env_value "TOOX_LOCAL_TUNNEL_PORT" "$local_tunnel_port"
   set_env_value "TOOX_SSH_PORT" "$ssh_port"
   set_env_value "TOOX_SSH_HOST" "$ssh_host"
+  set_env_value "TOOX_INSTALL_TRELLIS" "$install_trellis"
+  set_env_value "TOOX_TRELLIS_VENV" "./models/trellis-venv"
 }
 
 sync_dependencies() {
@@ -424,6 +437,89 @@ from backend.app.services.hunyuan_v1 import service
 service._ensure_background_remover()
 service._ensure_pipeline()
 print("[toox3d] Background remover assets and Hunyuan pipeline loaded and cached.")
+PY
+  )
+}
+
+install_trellis_runtime() {
+  export PATH="$HOME/.local/bin:$PATH"
+  local install_trellis
+  local trellis_repo
+  local trellis_venv
+  local trellis_python
+
+  install_trellis="$(get_env_value "TOOX_INSTALL_TRELLIS" "0")"
+  if [[ "$install_trellis" != "1" ]]; then
+    log "Skipping TRELLIS runtime install"
+    return
+  fi
+
+  trellis_repo="$PROJECT_ROOT/models/trellis-repo"
+  trellis_venv="$PROJECT_ROOT/models/trellis-venv"
+  trellis_python="$trellis_venv/bin/python"
+
+  if [[ ! -d "$trellis_repo/.git" ]]; then
+    log "Cloning TRELLIS repository"
+    mkdir -p "$PROJECT_ROOT/models"
+    git clone --depth 1 --recurse-submodules https://github.com/microsoft/TRELLIS.git "$trellis_repo"
+  else
+    log "TRELLIS repository already present"
+  fi
+
+  if [[ ! -x "$trellis_python" ]]; then
+    log "Creating TRELLIS venv"
+    python3 -m venv "$trellis_venv"
+  fi
+
+  log "Installing TRELLIS runtime dependencies"
+  "$trellis_python" -m pip install --upgrade pip setuptools wheel
+  "$trellis_python" -m pip install \
+    torch==2.5.1 torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+  "$trellis_python" -m pip install \
+    pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja \
+    rembg onnxruntime trimesh xatlas pyvista pymeshfix igraph transformers \
+    safetensors einops accelerate huggingface_hub omegaconf
+  "$trellis_python" -m pip install \
+    git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
+
+  if ! "$trellis_python" -m pip install xformers==0.0.28.post3 --index-url https://download.pytorch.org/whl/cu124; then
+    log "Warning: xformers install failed for TRELLIS. Continuing without it."
+  fi
+}
+
+preload_trellis_model() {
+  export PATH="$HOME/.local/bin:$PATH"
+  local install_trellis
+  local trellis_venv
+  local trellis_python
+
+  install_trellis="$(get_env_value "TOOX_INSTALL_TRELLIS" "0")"
+  if [[ "$install_trellis" != "1" ]]; then
+    return
+  fi
+
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    log "Skipping TRELLIS preload because nvidia-smi is not available"
+    return
+  fi
+
+  trellis_venv="$PROJECT_ROOT/models/trellis-venv"
+  trellis_python="$trellis_venv/bin/python"
+  if [[ ! -x "$trellis_python" ]]; then
+    log "Skipping TRELLIS preload because its venv is missing"
+    return
+  fi
+
+  log "Preloading TRELLIS repository and model weights"
+  (
+    cd "$PROJECT_ROOT"
+    TOOX_TRELLIS_VENV="./models/trellis-venv" \
+    uv run python - <<'PY'
+from backend.app.services.trellis_v1 import service
+
+service._ensure_pipeline()
+print("[toox3d] TRELLIS pipeline loaded and cached.")
 PY
   )
 }
@@ -515,7 +611,9 @@ main() {
   ensure_toox3d_command
   sync_dependencies
   ensure_python_multipart
+  install_trellis_runtime
   preload_hunyuan_model
+  preload_trellis_model
   start_uvicorn
   print_next_steps
 }
