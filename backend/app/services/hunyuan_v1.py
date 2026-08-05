@@ -25,7 +25,7 @@ class MeshGenerationError(RuntimeError):
 
 class HunyuanV1Service:
     MODEL_ID = "tencent/Hunyuan3D-2mini"
-    MODEL_SUBFOLDER = "hunyuan3d-dit-v2-mini-turbo"
+    MODEL_SUBFOLDER = "hunyuan3d-dit-v2-mini"
     PRINT_PROFILES = {
         "safe": {
             "ratio": 0.42,
