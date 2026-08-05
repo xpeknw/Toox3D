@@ -481,6 +481,8 @@ install_trellis_runtime() {
     rembg onnxruntime trimesh xatlas pyvista pymeshfix igraph transformers \
     safetensors einops accelerate huggingface_hub omegaconf open3d
   "$trellis_python" -m pip install \
+    kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu124.html
+  "$trellis_python" -m pip install \
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
   if ! "$trellis_python" -m pip install xformers==0.0.28.post3 --index-url https://download.pytorch.org/whl/cu124; then
