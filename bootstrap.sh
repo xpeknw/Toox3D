@@ -421,8 +421,9 @@ preload_hunyuan_model() {
     cd "$PROJECT_ROOT" && uv run python - <<'PY'
 from backend.app.services.hunyuan_v1 import service
 
+service._ensure_background_remover()
 service._ensure_pipeline()
-print("[toox3d] Hunyuan pipeline loaded and cached.")
+print("[toox3d] Background remover assets and Hunyuan pipeline loaded and cached.")
 PY
   )
 }

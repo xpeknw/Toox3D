@@ -12,6 +12,7 @@ from backend.app.services.hunyuan_v1 import (
     HunyuanV1Service,
     service as hunyuan_v1_service,
 )
+from backend.app.services.trellis_v1 import service as trellis_v1_service
 
 
 JOB_STATUS_QUEUED = "queued"
@@ -43,6 +44,10 @@ class HunyuanJobManager:
         self.generator = generator
         self.jobs_dir = self.generator.outputs_root / "_jobs"
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
+        self.generators = {
+            "hunyuan": hunyuan_v1_service,
+            "trellis": trellis_v1_service,
+        }
 
         self._lock = threading.Lock()
         self._queue: queue.Queue[str] = queue.Queue()
@@ -62,6 +67,7 @@ class HunyuanJobManager:
         *,
         filename: str,
         content: bytes,
+        engine: str,
         preset: str,
         print_profile: str,
         enable_postprocess: bool,
@@ -84,6 +90,7 @@ class HunyuanJobManager:
             progress_message="Queued",
             created_at=self._now(),
             params={
+                "engine": engine,
                 "preset": preset,
                 "print_profile": print_profile,
                 "enable_postprocess": enable_postprocess,
@@ -232,23 +239,12 @@ class HunyuanJobManager:
             with open(payload_path, "rb") as handle:
                 content = handle.read()
 
-            result = self.generator.generate(
+            generator = self._resolve_generator(record.params.get("engine"))
+            result = generator.generate(
                 filename=record.filename,
                 content=content,
                 job_id=job_id,
-                preset=record.params["preset"],
-                print_profile=record.params.get("print_profile", "balanced"),
-                enable_postprocess=record.params.get("enable_postprocess", True),
-                octree_resolution=record.params["octree_resolution"],
-                num_inference_steps=record.params["num_inference_steps"],
-                guidance_scale=record.params["guidance_scale"],
-                seed=record.params["seed"],
-                remove_background=record.params["remove_background"],
-                progress_callback=lambda percent, message: self._update_job(
-                    job_id,
-                    progress_percent=percent,
-                    progress_message=message,
-                ),
+                **self._build_generation_kwargs(record, job_id),
             )
         except CudaUnavailableError as exc:
             self._mark_failed(job_id, str(exc))
@@ -379,6 +375,7 @@ class HunyuanJobManager:
         print_mesh = result.get("print_mesh", {})
         raw_mesh = result.get("raw_mesh", {})
         return {
+            "engine": record.params.get("engine", "hunyuan"),
             "vertices": result.get("vertices"),
             "faces": result.get("faces"),
             "watertight": result.get("watertight"),
@@ -403,6 +400,34 @@ class HunyuanJobManager:
             "bundle_size_mb": bundle_size_mb,
             "all_bundle_size_mb": all_bundle_size_mb,
         }
+
+    def _build_generation_kwargs(
+        self,
+        record: JobRecord,
+        job_id: str,
+    ) -> dict[str, Any]:
+        return {
+            "preset": record.params["preset"],
+            "print_profile": record.params.get("print_profile", "balanced"),
+            "enable_postprocess": record.params.get("enable_postprocess", True),
+            "octree_resolution": record.params["octree_resolution"],
+            "num_inference_steps": record.params["num_inference_steps"],
+            "guidance_scale": record.params["guidance_scale"],
+            "seed": record.params["seed"],
+            "remove_background": record.params["remove_background"],
+            "progress_callback": lambda percent, message: self._update_job(
+                job_id,
+                progress_percent=percent,
+                progress_message=message,
+            ),
+        }
+
+    def _resolve_generator(self, engine: str | None) -> HunyuanV1Service:
+        normalized_engine = (engine or "hunyuan").strip().lower()
+        generator = self.generators.get(normalized_engine)
+        if generator is None:
+            raise ValueError(f"Unsupported engine: {normalized_engine}")
+        return generator
 
     def _average_completed_job_seconds(self, preset: str | None = None) -> float:
         completed_seconds: list[float] = []

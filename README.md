@@ -86,6 +86,7 @@ The bootstrap script also:
 - saves a failed NVIDIA state into `/tmp/toox3d_nvidia_retry_state`
 - reboots once automatically if NVIDIA is unavailable on first boot
 - aborts on the next run if NVIDIA is still unavailable, so you can destroy the instance
+- predownloads the background-removal model (`u2net.onnx`)
 - preloads the Hunyuan repo and weights on GPU hosts
 - starts `uvicorn` automatically on the configured port
 - writes the API log to `logs/uvicorn.log`

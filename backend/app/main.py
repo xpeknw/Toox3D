@@ -65,9 +65,19 @@ PRINT_PROFILES = {
     },
 }
 
+ENGINES = {
+    "hunyuan": {
+        "description": "Tencent Hunyuan3D mini turbo. Stable default path.",
+    },
+    "trellis": {
+        "description": "Microsoft TRELLIS image-to-3D pipeline. Optional heavier engine.",
+    },
+}
+
 
 def resolve_generation_params(
     *,
+    engine: str,
     preset: str,
     octree_resolution: int | None,
     num_inference_steps: int | None,
@@ -78,6 +88,13 @@ def resolve_generation_params(
     enable_postprocess: bool,
 ) -> dict:
     normalized_preset = preset.strip().lower()
+    normalized_engine = engine.strip().lower()
+    if normalized_engine not in ENGINES:
+        raise HTTPException(
+            status_code=400,
+            detail=("engine must be one of: " + ", ".join(sorted(ENGINES))),
+        )
+
     if normalized_preset not in GENERATION_PRESETS:
         raise HTTPException(
             status_code=400,
@@ -109,6 +126,7 @@ def resolve_generation_params(
         )
 
     return {
+        "engine": normalized_engine,
         "preset": normalized_preset,
         "print_profile": normalized_print_profile,
         "octree_resolution": (
@@ -139,12 +157,17 @@ def health() -> dict[str, str]:
 
 @app.get("/v2/presets")
 def list_v2_presets() -> dict[str, dict]:
-    return {"presets": GENERATION_PRESETS, "print_profiles": PRINT_PROFILES}
+    return {
+        "engines": ENGINES,
+        "presets": GENERATION_PRESETS,
+        "print_profiles": PRINT_PROFILES,
+    }
 
 
 @app.post("/v2/jobs")
 async def create_v2_job(
     image: UploadFile = File(...),
+    engine: str = Form("hunyuan"),
     preset: str = Form("v1-stable"),
     octree_resolution: int | None = Form(None),
     num_inference_steps: int | None = Form(None),
@@ -162,6 +185,7 @@ async def create_v2_job(
         raise HTTPException(status_code=400, detail="Image file is empty.")
 
     resolved = resolve_generation_params(
+        engine=engine,
         preset=preset,
         octree_resolution=octree_resolution,
         num_inference_steps=num_inference_steps,
@@ -275,6 +299,7 @@ async def generate_v1(
         raise HTTPException(status_code=400, detail="Image file is empty.")
 
     resolved = resolve_generation_params(
+        engine="hunyuan",
         preset=preset,
         octree_resolution=octree_resolution,
         num_inference_steps=num_inference_steps,
