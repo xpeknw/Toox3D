@@ -87,10 +87,23 @@ run_privileged() {
 wait_for_apt_lock() {
   local attempts=60
   local sleep_seconds=5
-  local lock_path="/var/lib/dpkg/lock-frontend"
+  local lock_paths=(
+    "/var/lib/dpkg/lock-frontend"
+    "/var/lib/apt/lists/lock"
+    "/var/cache/apt/archives/lock"
+  )
+  local all_free="1"
 
   for ((i=1; i<=attempts; i++)); do
-    if ! run_privileged fuser "$lock_path" >/dev/null 2>&1; then
+    all_free="1"
+    for lock_path in "${lock_paths[@]}"; do
+      if run_privileged fuser "$lock_path" >/dev/null 2>&1; then
+        all_free="0"
+        break
+      fi
+    done
+
+    if [[ "$all_free" == "1" ]]; then
       return 0
     fi
 
