@@ -518,8 +518,7 @@ preload_trellis_model() {
     uv run python - <<'PY'
 from backend.app.services.trellis_v1 import service
 
-service._ensure_pipeline()
-print("[toox3d] TRELLIS pipeline loaded and cached.")
+service.preload_runtime()
 PY
   )
 }
