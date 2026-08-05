@@ -621,11 +621,29 @@ class HunyuanV1Service:
         if self._background_remover is not None:
             return self._background_remover
 
-        self._ensure_repo()
-        self._ensure_repo_in_syspath()
-        from hy3dgen.rembg import BackgroundRemover
+        try:
+            self._ensure_repo()
+            self._ensure_repo_in_syspath()
+            from hy3dgen.rembg import BackgroundRemover
 
-        self._background_remover = BackgroundRemover()
+            self._background_remover = BackgroundRemover()
+            return self._background_remover
+        except Exception:
+            from PIL import Image
+            from rembg import remove
+
+            class BackgroundRemoverFallback:
+                def __call__(self, image):
+                    output = remove(image)
+                    if isinstance(output, bytes):
+                        import io
+
+                        return Image.open(io.BytesIO(output)).convert("RGBA")
+                    if hasattr(output, "convert"):
+                        return output.convert("RGBA")
+                    return image
+
+            self._background_remover = BackgroundRemoverFallback()
         return self._background_remover
 
     def _cleanup_gpu(self) -> None:
