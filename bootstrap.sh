@@ -7,6 +7,7 @@ TOOX_ENV_FILE="$PROJECT_ROOT/.env"
 TOOX_LOG_DIR="$PROJECT_ROOT/logs"
 TOOX_UVICORN_LOG="$TOOX_LOG_DIR/uvicorn.log"
 TOOX_UVICORN_PID_FILE="$TOOX_LOG_DIR/uvicorn.pid"
+TOOX_NVIDIA_RETRY_FILE="/tmp/toox3d_nvidia_retry_state"
 CLI_TOOX_PORT=""
 CLI_LOCAL_TUNNEL_PORT=""
 CLI_SSH_PORT=""
@@ -191,13 +192,30 @@ PY
 }
 
 check_nvidia() {
+  local diagnostics=""
+
   if command -v nvidia-smi >/dev/null 2>&1; then
-    log "Detected NVIDIA tooling"
-    nvidia-smi || true
-    return
+    diagnostics="$(nvidia-smi 2>&1 || true)"
+    if nvidia-smi >/dev/null 2>&1; then
+      log "Detected NVIDIA tooling"
+      printf '%s\n' "$diagnostics"
+      rm -f "$TOOX_NVIDIA_RETRY_FILE"
+      return
+    fi
+  else
+    diagnostics="nvidia-smi not found in PATH"
   fi
 
-  log "nvidia-smi not found; GPU validation will need to happen later on a GPU VM"
+  if [[ -f "$TOOX_NVIDIA_RETRY_FILE" ]]; then
+    local previous_state
+    previous_state="$(cat "$TOOX_NVIDIA_RETRY_FILE" 2>/dev/null || true)"
+    die "NVIDIA still failed after one reboot attempt. Destroy this instance instead of spending more time or money. Previous state: ${previous_state}. Current state: ${diagnostics}"
+  fi
+
+  printf 'timestamp=%s\nstate=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$diagnostics" > "$TOOX_NVIDIA_RETRY_FILE"
+  log "NVIDIA check failed. Saved state to $TOOX_NVIDIA_RETRY_FILE and rebooting once."
+  run_privileged reboot
+  exit 0
 }
 
 check_docker() {
@@ -469,13 +487,13 @@ main() {
   parse_args "$@"
   require_linux
   check_ubuntu
+  check_nvidia
   ensure_apt_packages
   ensure_uv
   ensure_docker
   ensure_docker_compose
   check_docker
   check_python
-  check_nvidia
   ensure_env_file
   ensure_directories
   ensure_local_bin_on_path

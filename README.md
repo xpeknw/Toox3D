@@ -82,6 +82,10 @@ For fully non-interactive runs without passing any values:
 The bootstrap script also:
 
 - persists `export PATH="$HOME/.local/bin:$PATH"` into `~/.bashrc` and `~/.profile`
+- checks `nvidia-smi` early before expensive work
+- saves a failed NVIDIA state into `/tmp/toox3d_nvidia_retry_state`
+- reboots once automatically if NVIDIA is unavailable on first boot
+- aborts on the next run if NVIDIA is still unavailable, so you can destroy the instance
 - preloads the Hunyuan repo and weights on GPU hosts
 - starts `uvicorn` automatically on the configured port
 - writes the API log to `logs/uvicorn.log`
