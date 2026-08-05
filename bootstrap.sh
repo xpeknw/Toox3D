@@ -78,6 +78,7 @@ ensure_apt_packages() {
     ca-certificates \
     git \
     build-essential \
+    libopengl0 \
     python3 \
     python3-venv \
     python3-pip

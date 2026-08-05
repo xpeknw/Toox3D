@@ -96,6 +96,7 @@ class HunyuanV1Service:
         seed: int = 1234,
         remove_background: bool = True,
         print_profile: str = "balanced",
+        enable_postprocess: bool = True,
         progress_callback: Callable[[int, str], None] | None = None,
     ) -> dict[str, Any]:
         started_at = time.time()
@@ -170,11 +171,18 @@ class HunyuanV1Service:
         raw_watertight = bool(mesh.is_watertight)
 
         self._report_progress(
-            progress_callback, 86, "Optimizing mesh for 3D printing"
+            progress_callback,
+            86,
+            (
+                "Optimizing mesh for 3D printing"
+                if enable_postprocess
+                else "Skipping print post-process"
+            ),
         )
         print_mesh, print_profile_metadata = self._build_print_ready_mesh(
             mesh,
             print_profile=print_profile,
+            enable_postprocess=enable_postprocess,
         )
 
         self._report_progress(progress_callback, 92, "Exporting mesh artifacts")
@@ -199,6 +207,7 @@ class HunyuanV1Service:
             "seed": seed,
             "remove_background_requested": remove_background,
             "remove_background_applied": remove_background_applied,
+            "enable_postprocess": enable_postprocess,
             "print_profile": print_profile_metadata["profile"],
             "vertices": int(len(print_mesh.vertices)),
             "faces": int(len(print_mesh.faces)),
@@ -641,6 +650,7 @@ class HunyuanV1Service:
         mesh: Any,
         *,
         print_profile: str,
+        enable_postprocess: bool,
     ) -> tuple[Any, dict[str, Any]]:
         print_mesh = mesh.copy()
         original_faces = int(len(print_mesh.faces))
@@ -651,6 +661,21 @@ class HunyuanV1Service:
             profile_name=profile_name,
         )
         operations: list[str] = []
+
+        if not enable_postprocess:
+            self._cleanup_mesh(print_mesh)
+            operations.append("postprocess_skipped:user_disabled")
+            return print_mesh, {
+                "profile": "disabled",
+                "vertices": int(len(print_mesh.vertices)),
+                "faces": int(len(print_mesh.faces)),
+                "watertight": bool(print_mesh.is_watertight),
+                "target_faces": original_faces,
+                "reduction_ratio": 0.0,
+                "source_vertices": original_vertices,
+                "source_faces": original_faces,
+                "operations": operations,
+            }
 
         try:
             repaired_mesh = self._repair_with_pymeshlab(

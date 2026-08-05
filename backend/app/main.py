@@ -75,6 +75,7 @@ def resolve_generation_params(
     seed: int,
     remove_background: bool,
     print_profile: str,
+    enable_postprocess: bool,
 ) -> dict:
     normalized_preset = preset.strip().lower()
     if normalized_preset not in GENERATION_PRESETS:
@@ -127,6 +128,7 @@ def resolve_generation_params(
         ),
         "seed": seed,
         "remove_background": remove_background,
+        "enable_postprocess": enable_postprocess,
     }
 
 
@@ -150,6 +152,7 @@ async def create_v2_job(
     seed: int = Form(1234),
     remove_background: bool = Form(True),
     print_profile: str = Form("balanced"),
+    enable_postprocess: bool = Form(True),
 ) -> dict:
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
@@ -166,6 +169,7 @@ async def create_v2_job(
         seed=seed,
         remove_background=remove_background,
         print_profile=print_profile,
+        enable_postprocess=enable_postprocess,
     )
 
     record = job_manager.submit_job(
@@ -261,6 +265,7 @@ async def generate_v1(
     seed: int = Form(1234),
     remove_background: bool = Form(True),
     print_profile: str = Form("balanced"),
+    enable_postprocess: bool = Form(True),
 ):
     if not image.filename:
         raise HTTPException(status_code=400, detail="Image filename is required.")
@@ -277,6 +282,7 @@ async def generate_v1(
         seed=seed,
         remove_background=remove_background,
         print_profile=print_profile,
+        enable_postprocess=enable_postprocess,
     )
 
     try:
