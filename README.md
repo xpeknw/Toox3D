@@ -45,7 +45,11 @@ The first server boot may take several minutes because it may need to:
 - install `uv`
 - install Docker
 - resolve Python dependencies, including the Hunyuan V1 stack
+- clone the Tencent Hunyuan3D-2 repository
+- download Hunyuan model weights from Hugging Face
+- initialize the Hunyuan pipeline once in GPU memory
 - build the Docker image
+- start `uvicorn` automatically in the background
 
 During `bootstrap.sh`, the script can ask for:
 
@@ -55,6 +59,32 @@ During `bootstrap.sh`, the script can ask for:
 - the server public IP or hostname
 
 Those values are stored in `.env` and reused later.
+
+You can also pass them directly to avoid interactive prompts:
+
+```bash
+./bootstrap.sh \
+  --port 8011 \
+  --ssh-port 27608 \
+  --ssh-host 151.237.25.234
+```
+
+If you pass any of those values, bootstrap skips the interactive questions and
+fills the rest from defaults or previously saved `.env` values. `--local-port`
+defaults to the same value as `--port`.
+
+For fully non-interactive runs without passing any values:
+
+```bash
+./bootstrap.sh --no-prompt
+```
+
+The bootstrap script also:
+
+- persists `export PATH="$HOME/.local/bin:$PATH"` into `~/.bashrc` and `~/.profile`
+- preloads the Hunyuan repo and weights on GPU hosts
+- starts `uvicorn` automatically on the configured port
+- writes the API log to `logs/uvicorn.log`
 
 ## Local development
 
@@ -113,12 +143,8 @@ docker compose down
 
 ## Generate V1
 
-The first request to `POST /generate-v1` may take significantly longer because
-it may need to:
-
-- clone the Tencent Hunyuan3D-2 repository
-- download model weights from Hugging Face
-- initialize the model in GPU memory
+After a successful GPU bootstrap, the Hunyuan repo and model weights should
+already be downloaded and the first request penalty should be much smaller.
 
 Example request:
 

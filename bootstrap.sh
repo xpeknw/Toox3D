@@ -4,6 +4,14 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXPECTED_UBUNTU_VERSION="22.04"
 TOOX_ENV_FILE="$PROJECT_ROOT/.env"
+TOOX_LOG_DIR="$PROJECT_ROOT/logs"
+TOOX_UVICORN_LOG="$TOOX_LOG_DIR/uvicorn.log"
+TOOX_UVICORN_PID_FILE="$TOOX_LOG_DIR/uvicorn.pid"
+CLI_TOOX_PORT=""
+CLI_LOCAL_TUNNEL_PORT=""
+CLI_SSH_PORT=""
+CLI_SSH_HOST=""
+CLI_NO_PROMPT="0"
 
 log() {
   printf '\n[%s] %s\n' "toox3d" "$1"
@@ -12,6 +20,59 @@ log() {
 die() {
   echo "$1" >&2
   exit 1
+}
+
+print_usage() {
+  cat <<EOF
+Usage:
+  ./bootstrap.sh [options]
+
+Options:
+  --port <value>          FastAPI port on the server
+  --local-port <value>    Local SSH tunnel port on your Mac (defaults to --port)
+  --ssh-port <value>      Vast.ai SSH port
+  --ssh-host <value>      Vast.ai public IP or hostname
+  --no-prompt             Do not ask interactive questions
+  --help                  Show this help
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --port)
+        [[ $# -ge 2 ]] || die "--port requires a value"
+        CLI_TOOX_PORT="$2"
+        shift 2
+        ;;
+      --local-port)
+        [[ $# -ge 2 ]] || die "--local-port requires a value"
+        CLI_LOCAL_TUNNEL_PORT="$2"
+        shift 2
+        ;;
+      --ssh-port)
+        [[ $# -ge 2 ]] || die "--ssh-port requires a value"
+        CLI_SSH_PORT="$2"
+        shift 2
+        ;;
+      --ssh-host)
+        [[ $# -ge 2 ]] || die "--ssh-host requires a value"
+        CLI_SSH_HOST="$2"
+        shift 2
+        ;;
+      --no-prompt)
+        CLI_NO_PROMPT="1"
+        shift
+        ;;
+      --help|-h)
+        print_usage
+        exit 0
+        ;;
+      *)
+        die "Unknown option: $1. Run ./bootstrap.sh --help"
+        ;;
+    esac
+  done
 }
 
 run_privileged() {
@@ -157,7 +218,55 @@ ensure_env_file() {
 
 ensure_directories() {
   log "Creating local directories"
-  mkdir -p "$PROJECT_ROOT/models" "$PROJECT_ROOT/outputs" "$PROJECT_ROOT/scripts"
+  mkdir -p "$PROJECT_ROOT/models" "$PROJECT_ROOT/outputs" "$PROJECT_ROOT/scripts" "$TOOX_LOG_DIR"
+}
+
+ensure_local_bin_on_path() {
+  local export_line='export PATH="$HOME/.local/bin:$PATH"'
+
+  export PATH="$HOME/.local/bin:$PATH"
+
+  for shell_file in "$HOME/.bashrc" "$HOME/.profile"; do
+    touch "$shell_file"
+    if ! grep -Fq "$export_line" "$shell_file"; then
+      printf '\n%s\n' "$export_line" >> "$shell_file"
+      log "Added ~/.local/bin PATH export to $(basename "$shell_file")"
+    fi
+  done
+}
+
+ensure_toox3d_command() {
+  local command_path="$HOME/.local/bin/toox3d"
+  local alias_line="alias toox3d='uv run uvicorn backend.app.main:app --host 0.0.0.0 --port \$(grep -E \"^TOOX_PORT=\" \"$TOOX_ENV_FILE\" | tail -n 1 | cut -d '=' -f2- || echo 8011) --reload'"
+
+  mkdir -p "$HOME/.local/bin"
+
+  cat > "$command_path" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$PROJECT_ROOT"
+TOOX_ENV_FILE="$TOOX_ENV_FILE"
+export PATH="\$HOME/.local/bin:\$PATH"
+
+TOOX_PORT="\$(grep -E '^TOOX_PORT=' "\$TOOX_ENV_FILE" | tail -n 1 | cut -d '=' -f2- || true)"
+if [[ -z "\$TOOX_PORT" ]]; then
+  TOOX_PORT="8011"
+fi
+
+cd "\$PROJECT_ROOT"
+exec uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "\$TOOX_PORT" --reload
+EOF
+
+  chmod +x "$command_path"
+
+  for shell_file in "$HOME/.bashrc" "$HOME/.profile"; do
+    touch "$shell_file"
+    if ! grep -Fq "alias toox3d=" "$shell_file"; then
+      printf '\n%s\n' "$alias_line" >> "$shell_file"
+      log "Added toox3d alias to $(basename "$shell_file")"
+    fi
+  done
 }
 
 set_env_value() {
@@ -205,23 +314,42 @@ prompt_value() {
 configure_runtime_values() {
   local current_port current_local_port current_ssh_port current_ssh_host
   local toox_port local_tunnel_port ssh_port ssh_host
+  local cli_values_supplied="0"
 
   current_port="$(get_env_value "TOOX_PORT" "8011")"
   current_local_port="$(get_env_value "TOOX_LOCAL_TUNNEL_PORT" "$current_port")"
   current_ssh_port="$(get_env_value "TOOX_SSH_PORT" "")"
   current_ssh_host="$(get_env_value "TOOX_SSH_HOST" "")"
 
-  if [[ -t 0 ]]; then
+  toox_port="${CLI_TOOX_PORT:-}"
+  local_tunnel_port="${CLI_LOCAL_TUNNEL_PORT:-}"
+  ssh_port="${CLI_SSH_PORT:-}"
+  ssh_host="${CLI_SSH_HOST:-}"
+
+  if [[ -n "$toox_port" || -n "$local_tunnel_port" || -n "$ssh_port" || -n "$ssh_host" ]]; then
+    cli_values_supplied="1"
+  fi
+
+  if [[ -n "$toox_port" && -z "$local_tunnel_port" ]]; then
+    local_tunnel_port="$toox_port"
+  fi
+
+  if [[ "$CLI_NO_PROMPT" == "1" || "$cli_values_supplied" == "1" ]]; then
+    [[ -n "$toox_port" ]] || toox_port="$current_port"
+    [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$toox_port"
+    [[ -n "$ssh_port" ]] || ssh_port="$current_ssh_port"
+    [[ -n "$ssh_host" ]] || ssh_host="$current_ssh_host"
+  elif [[ -t 0 ]]; then
     log "Configure server and tunnel values"
-    toox_port="$(prompt_value "FastAPI port on the server" "$current_port")"
-    local_tunnel_port="$(prompt_value "Local port on your Mac for the SSH tunnel" "$current_local_port")"
-    ssh_port="$(prompt_value "Vast.ai SSH port (leave blank if not needed now)" "$current_ssh_port")"
-    ssh_host="$(prompt_value "Vast.ai public IP or hostname (leave blank if not needed now)" "$current_ssh_host")"
+    [[ -n "$toox_port" ]] || toox_port="$(prompt_value "FastAPI port on the server" "$current_port")"
+    [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$(prompt_value "Local port on your Mac for the SSH tunnel" "$toox_port")"
+    [[ -n "$ssh_port" ]] || ssh_port="$(prompt_value "Vast.ai SSH port (leave blank if not needed now)" "$current_ssh_port")"
+    [[ -n "$ssh_host" ]] || ssh_host="$(prompt_value "Vast.ai public IP or hostname (leave blank if not needed now)" "$current_ssh_host")"
   else
-    toox_port="$current_port"
-    local_tunnel_port="$current_local_port"
-    ssh_port="$current_ssh_port"
-    ssh_host="$current_ssh_host"
+    [[ -n "$toox_port" ]] || toox_port="$current_port"
+    [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$toox_port"
+    [[ -n "$ssh_port" ]] || ssh_port="$current_ssh_port"
+    [[ -n "$ssh_host" ]] || ssh_host="$current_ssh_host"
   fi
 
   set_env_value "TOOX_PORT" "$toox_port"
@@ -249,6 +377,63 @@ ensure_python_multipart() {
   (cd "$PROJECT_ROOT" && uv pip install python-multipart)
 }
 
+preload_hunyuan_model() {
+  export PATH="$HOME/.local/bin:$PATH"
+
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    log "Skipping Hunyuan preload because nvidia-smi is not available"
+    return
+  fi
+
+  log "Preloading Hunyuan repository and model weights"
+  (
+    cd "$PROJECT_ROOT" && uv run python - <<'PY'
+from backend.app.services.hunyuan_v1 import service
+
+service._ensure_pipeline()
+print("[toox3d] Hunyuan pipeline loaded and cached.")
+PY
+  )
+}
+
+start_uvicorn() {
+  export PATH="$HOME/.local/bin:$PATH"
+  local toox_port
+  toox_port="$(get_env_value "TOOX_PORT" "8011")"
+
+  if [[ -f "$TOOX_UVICORN_PID_FILE" ]]; then
+    local existing_pid
+    existing_pid="$(cat "$TOOX_UVICORN_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" >/dev/null 2>&1; then
+      log "Stopping existing uvicorn process ($existing_pid)"
+      kill "$existing_pid" >/dev/null 2>&1 || true
+      sleep 1
+    fi
+    rm -f "$TOOX_UVICORN_PID_FILE"
+  fi
+
+  log "Starting uvicorn on port ${toox_port}"
+  (
+    cd "$PROJECT_ROOT"
+    nohup uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "$toox_port" --reload \
+      >"$TOOX_UVICORN_LOG" 2>&1 &
+    echo $! > "$TOOX_UVICORN_PID_FILE"
+  )
+
+  sleep 3
+
+  if [[ -f "$TOOX_UVICORN_PID_FILE" ]]; then
+    local new_pid
+    new_pid="$(cat "$TOOX_UVICORN_PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$new_pid" ]] && kill -0 "$new_pid" >/dev/null 2>&1; then
+      log "uvicorn started in background with PID ${new_pid}"
+      return
+    fi
+  fi
+
+  die "uvicorn did not stay running. Check $TOOX_UVICORN_LOG"
+}
+
 print_next_steps() {
   local toox_port local_tunnel_port ssh_port ssh_host
   toox_port="$(get_env_value "TOOX_PORT" "8011")"
@@ -259,12 +444,13 @@ print_next_steps() {
   cat <<EOF
 
 Next steps:
-  export PATH="\$HOME/.local/bin:\$PATH"
-  uv run uvicorn backend.app.main:app --host 0.0.0.0 --port ${toox_port} --reload
   docker compose up --build
 
 Health check:
   curl http://127.0.0.1:${toox_port}/health
+
+Uvicorn log:
+  tail -f ${TOOX_UVICORN_LOG}
 EOF
 
   if [[ -n "$ssh_port" && -n "$ssh_host" ]]; then
@@ -280,6 +466,7 @@ EOF
 }
 
 main() {
+  parse_args "$@"
   require_linux
   check_ubuntu
   ensure_apt_packages
@@ -291,9 +478,13 @@ main() {
   check_nvidia
   ensure_env_file
   ensure_directories
+  ensure_local_bin_on_path
   configure_runtime_values
+  ensure_toox3d_command
   sync_dependencies
   ensure_python_multipart
+  preload_hunyuan_model
+  start_uvicorn
   print_next_steps
 }
 
