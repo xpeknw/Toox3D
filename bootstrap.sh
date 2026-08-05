@@ -479,7 +479,7 @@ install_trellis_runtime() {
   "$trellis_python" -m pip install \
     pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja \
     rembg onnxruntime trimesh xatlas pyvista pymeshfix igraph transformers \
-    safetensors einops accelerate huggingface_hub omegaconf
+    safetensors einops accelerate huggingface_hub omegaconf open3d
   "$trellis_python" -m pip install \
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
