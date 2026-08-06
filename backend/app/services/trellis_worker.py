@@ -37,9 +37,11 @@ def ensure_runtime(repo_dir: str, hf_home: str):
 
 def preload_pipeline(repo_dir: str, hf_home: str, model_id: str) -> None:
     ensure_runtime(repo_dir, hf_home)
+    from huggingface_hub import snapshot_download
     from trellis.pipelines import TrellisImageTo3DPipeline
 
-    pipeline = TrellisImageTo3DPipeline.from_pretrained(model_id)
+    local_model_path = snapshot_download(repo_id=model_id, cache_dir=hf_home)
+    pipeline = TrellisImageTo3DPipeline.from_pretrained(local_model_path)
     pipeline.cuda()
     print("[toox3d] TRELLIS pipeline loaded and cached.")
     del pipeline
@@ -58,12 +60,14 @@ def generate_mesh(
 ) -> None:
     ensure_runtime(repo_dir, hf_home)
 
+    from huggingface_hub import snapshot_download
     from PIL import Image
     from trellis.pipelines import TrellisImageTo3DPipeline
     import numpy as np
     import trimesh
 
-    pipeline = TrellisImageTo3DPipeline.from_pretrained(model_id)
+    local_model_path = snapshot_download(repo_id=model_id, cache_dir=hf_home)
+    pipeline = TrellisImageTo3DPipeline.from_pretrained(local_model_path)
     pipeline.cuda()
 
     image = Image.open(image_path).convert("RGBA")
