@@ -241,6 +241,8 @@ class TrellisV1Service(HunyuanV1Service):
     def _run_worker_command(self, command: list[str]) -> None:
         env = dict(os.environ)
         env["HF_HOME"] = str(self.hf_cache_dir)
+        env["ATTN_BACKEND"] = env.get("ATTN_BACKEND", "xformers")
+        env["SPCONV_ALGO"] = env.get("SPCONV_ALGO", "native")
         process = subprocess.run(
             command,
             cwd=str(self.project_root),

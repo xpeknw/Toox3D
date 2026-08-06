@@ -486,7 +486,7 @@ install_trellis_runtime() {
     git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
 
   if ! "$trellis_python" -m pip install xformers==0.0.28.post3 --index-url https://download.pytorch.org/whl/cu124; then
-    log "Warning: xformers install failed for TRELLIS. Continuing without it."
+    log "Warning: xformers install failed for TRELLIS. TRELLIS currently expects the xformers attention backend."
   fi
 }
 

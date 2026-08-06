@@ -105,7 +105,9 @@ virtual environment at `models/trellis-venv`.
 
 TRELLIS uses a heavier dependency stack than Hunyuan. The bootstrap currently
 installs its isolated runtime incrementally around the official project
-requirements, including `open3d` and `kaolin`. Depending on GPU/CUDA/driver
+requirements, including `open3d`, `kaolin`, and `xformers`. The isolated worker
+prefers `ATTN_BACKEND=xformers` with `SPCONV_ALGO=native` to avoid relying on
+`flash-attn` during initial bring-up. Depending on GPU/CUDA/driver
 combinations, additional native extensions from the upstream TRELLIS setup may
 still be required later.
 

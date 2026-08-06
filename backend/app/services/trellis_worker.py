@@ -31,6 +31,7 @@ def ensure_runtime(repo_dir: str, hf_home: str):
 
     os.environ["HF_HOME"] = hf_home
     os.environ.setdefault("SPCONV_ALGO", "native")
+    os.environ.setdefault("ATTN_BACKEND", "xformers")
     if repo_dir not in sys.path:
         sys.path.insert(0, repo_dir)
 
