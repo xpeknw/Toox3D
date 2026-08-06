@@ -338,7 +338,7 @@ ensure_local_bin_on_path() {
 
 ensure_toox3d_command() {
   local command_path="$HOME/.local/bin/toox3d"
-  local alias_line="alias toox3d='uv run uvicorn backend.app.main:app --host 0.0.0.0 --port \$(grep -E \"^TOOX_PORT=\" \"$TOOX_ENV_FILE\" | tail -n 1 | cut -d '=' -f2- || echo 8011) --reload'"
+  local alias_line="alias toox3d='uv run uvicorn backend.app.main:app --host 0.0.0.0 --port \$(grep -E \"^TOOX_PORT=\" \"$TOOX_ENV_FILE\" | tail -n 1 | cut -d '=' -f2- || echo 8011)'"
 
   mkdir -p "$HOME/.local/bin"
 
@@ -363,7 +363,7 @@ if [[ -z "\$TOOX_PORT" ]]; then
 fi
 
 cd "\$PROJECT_ROOT"
-exec uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "\$TOOX_PORT" --reload
+exec uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "\$TOOX_PORT"
 EOF
 
   chmod +x "$command_path"
@@ -771,7 +771,7 @@ start_uvicorn() {
       source "$TOOX_ENV_FILE"
       set +a
     fi
-    nohup uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "$toox_port" --reload \
+    nohup uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "$toox_port" \
       >"$TOOX_UVICORN_LOG" 2>&1 &
     echo $! > "$TOOX_UVICORN_PID_FILE"
   )
