@@ -629,6 +629,8 @@ install_spar3d_runtime() {
     --index-url https://download.pytorch.org/whl/cu124
   (
     cd "$spar3d_repo"
+    export USE_CUDA=1
+    export LD_LIBRARY_PATH="$spar3d_venv/lib/python3.10/site-packages/torch/lib:${LD_LIBRARY_PATH:-}"
     clip_tmp_dir="$(mktemp -d /tmp/toox3d-clip-XXXXXX)"
     alphaclip_tmp_dir="$(mktemp -d /tmp/toox3d-alphaclip-XXXXXX)"
     git clone --depth 1 https://github.com/openai/CLIP.git "$clip_tmp_dir"
@@ -643,6 +645,8 @@ install_spar3d_runtime() {
     )
     grep -v 'github.com/openai/CLIP.git\|github.com/SunzeY/AlphaCLIP.git' requirements.txt > /tmp/toox3d-spar3d-requirements.txt
     "$spar3d_python" -m pip install --no-build-isolation -r /tmp/toox3d-spar3d-requirements.txt
+    "$spar3d_python" -m pip install --force-reinstall --no-build-isolation ./texture_baker
+    "$spar3d_python" -m pip install --force-reinstall --no-build-isolation ./uv_unwrapper
     "$spar3d_python" - <<'PY'
 from pathlib import Path
 import site
