@@ -342,13 +342,20 @@ ensure_toox3d_command() {
 
   mkdir -p "$HOME/.local/bin"
 
-  cat > "$command_path" <<EOF
+cat > "$command_path" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
 PROJECT_ROOT="$PROJECT_ROOT"
 TOOX_ENV_FILE="$TOOX_ENV_FILE"
 export PATH="\$HOME/.local/bin:\$PATH"
+
+if [[ -f "\$TOOX_ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "\$TOOX_ENV_FILE"
+  set +a
+fi
 
 TOOX_PORT="\$(grep -E '^TOOX_PORT=' "\$TOOX_ENV_FILE" | tail -n 1 | cut -d '=' -f2- || true)"
 if [[ -z "\$TOOX_PORT" ]]; then
@@ -616,12 +623,13 @@ install_spar3d_runtime() {
 
   log "Installing SPAR3D runtime dependencies"
   "$spar3d_python" -m pip install --upgrade pip setuptools==69.5.1 wheel
+  "$spar3d_python" -m pip install packaging
   "$spar3d_python" -m pip install \
     torch==2.5.1 torchvision==0.20.1 \
     --index-url https://download.pytorch.org/whl/cu124
   (
     cd "$spar3d_repo"
-    "$spar3d_python" -m pip install -r requirements.txt
+    PIP_NO_BUILD_ISOLATION=1 "$spar3d_python" -m pip install -r requirements.txt
   )
 }
 
@@ -722,6 +730,12 @@ start_uvicorn() {
   log "Starting uvicorn on port ${toox_port}"
   (
     cd "$PROJECT_ROOT"
+    if [[ -f "$TOOX_ENV_FILE" ]]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "$TOOX_ENV_FILE"
+      set +a
+    fi
     nohup uv run uvicorn backend.app.main:app --host 0.0.0.0 --port "$toox_port" --reload \
       >"$TOOX_UVICORN_LOG" 2>&1 &
     echo $! > "$TOOX_UVICORN_PID_FILE"
