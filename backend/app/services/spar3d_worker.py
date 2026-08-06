@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -66,7 +67,7 @@ def generate_glb(
         )
 
     command = [
-        "python",
+        sys.executable,
         "run.py",
         image_path,
         "--output-dir",
