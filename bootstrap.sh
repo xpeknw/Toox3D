@@ -643,6 +643,28 @@ install_spar3d_runtime() {
     )
     grep -v 'github.com/openai/CLIP.git\|github.com/SunzeY/AlphaCLIP.git' requirements.txt > /tmp/toox3d-spar3d-requirements.txt
     "$spar3d_python" -m pip install --no-build-isolation -r /tmp/toox3d-spar3d-requirements.txt
+    "$spar3d_python" - <<'PY'
+from pathlib import Path
+import site
+
+site_packages = []
+for base in site.getsitepackages():
+    candidate = Path(base) / "transparent_background" / "__init__.py"
+    if candidate.exists():
+        site_packages.append(candidate)
+
+patched_code = """from transparent_background.Remover import Remover
+
+try:
+    from transparent_background.gui import gui
+except Exception:
+    gui = None
+"""
+
+for init_file in site_packages:
+    init_file.write_text(patched_code, encoding="utf-8")
+    print(f"[toox3d] Patched transparent_background init: {init_file}")
+PY
   )
 }
 

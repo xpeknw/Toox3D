@@ -38,6 +38,25 @@ def ensure_runtime(repo_dir: str, hf_home: str, hf_token: str):
     if not repo_path.exists():
         raise RuntimeError(f"SPAR3D repo directory does not exist: {repo_dir}")
 
+    patch_transparent_background()
+
+
+def patch_transparent_background() -> None:
+    import site
+
+    patched_code = """from transparent_background.Remover import Remover
+
+try:
+    from transparent_background.gui import gui
+except Exception:
+    gui = None
+"""
+
+    for base in site.getsitepackages():
+        init_file = Path(base) / "transparent_background" / "__init__.py"
+        if init_file.exists():
+            init_file.write_text(patched_code, encoding="utf-8")
+
 
 def preload_model(repo_dir: str, hf_home: str, hf_token: str) -> None:
     ensure_runtime(repo_dir, hf_home, hf_token)
