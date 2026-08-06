@@ -480,6 +480,9 @@ install_trellis_runtime() {
     pillow imageio imageio-ffmpeg tqdm easydict opencv-python-headless scipy ninja \
     rembg onnxruntime trimesh xatlas pyvista pymeshfix igraph transformers \
     safetensors einops accelerate huggingface_hub omegaconf open3d
+  if ! "$trellis_python" -m pip install spconv-cu120; then
+    log "Warning: spconv-cu120 install failed for TRELLIS. TRELLIS currently expects spconv in its isolated runtime."
+  fi
   "$trellis_python" -m pip install \
     kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.5.1_cu124.html
   "$trellis_python" -m pip install \
