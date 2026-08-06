@@ -39,6 +39,7 @@ def ensure_runtime(repo_dir: str, hf_home: str, hf_token: str):
         raise RuntimeError(f"SPAR3D repo directory does not exist: {repo_dir}")
 
     patch_transparent_background()
+    patch_spar3d_run_py(repo_path)
 
 
 def patch_transparent_background() -> None:
@@ -56,6 +57,30 @@ except Exception:
         init_file = Path(base) / "transparent_background" / "__init__.py"
         if init_file.exists():
             init_file.write_text(patched_code, encoding="utf-8")
+
+
+def patch_spar3d_run_py(repo_path: Path) -> None:
+    run_py = repo_path / "run.py"
+    if not run_py.exists():
+        return
+
+    source = run_py.read_text(encoding="utf-8")
+    marker = "# toox3d compatibility patch"
+    if marker in source:
+        return
+
+    original = "args = parser.parse_args()"
+    replacement = """args = parser.parse_args()
+# toox3d compatibility patch
+if not hasattr(args, "reduction_count_type"):
+    args.reduction_count_type = "keep"
+if not hasattr(args, "reduction_count"):
+    args.reduction_count = -1
+"""
+
+    if original in source:
+        source = source.replace(original, replacement, 1)
+        run_py.write_text(source, encoding="utf-8")
 
 
 def preload_model(repo_dir: str, hf_home: str, hf_token: str) -> None:
