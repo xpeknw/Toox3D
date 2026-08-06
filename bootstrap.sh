@@ -12,7 +12,9 @@ CLI_TOOX_PORT=""
 CLI_LOCAL_TUNNEL_PORT=""
 CLI_SSH_PORT=""
 CLI_SSH_HOST=""
+CLI_ENGINES=""
 CLI_INSTALL_TRELLIS=""
+CLI_INSTALL_SPAR3D=""
 CLI_NO_PROMPT="0"
 
 log() {
@@ -34,7 +36,9 @@ Options:
   --local-port <value>    Local SSH tunnel port on your Mac (defaults to --port)
   --ssh-port <value>      Vast.ai SSH port
   --ssh-host <value>      Vast.ai public IP or hostname
+  --engines <value>       Engines to enable: hunyuan | hunyuan,trellis | hunyuan,spar3d | all
   --install-trellis       Install TRELLIS runtime during bootstrap
+  --install-spar3d        Install SPAR3D runtime during bootstrap
   --no-prompt             Do not ask interactive questions
   --help                  Show this help
 EOF
@@ -63,8 +67,17 @@ parse_args() {
         CLI_SSH_HOST="$2"
         shift 2
         ;;
+      --engines)
+        [[ $# -ge 2 ]] || die "--engines requires a value"
+        CLI_ENGINES="$2"
+        shift 2
+        ;;
       --install-trellis)
         CLI_INSTALL_TRELLIS="1"
+        shift
+        ;;
+      --install-spar3d)
+        CLI_INSTALL_SPAR3D="1"
         shift
         ;;
       --no-prompt)
@@ -88,6 +101,57 @@ run_privileged() {
   else
     sudo "$@"
   fi
+}
+
+normalize_engines() {
+  local raw_value="${1:-}"
+  local normalized_csv=""
+  local include_hunyuan="0"
+  local include_trellis="0"
+  local include_spar3d="0"
+
+  if [[ -z "$raw_value" ]]; then
+    raw_value="hunyuan"
+  fi
+
+  raw_value="$(printf '%s' "$raw_value" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
+  if [[ "$raw_value" == "all" ]]; then
+    raw_value="hunyuan,trellis,spar3d"
+  fi
+
+  IFS=',' read -r -a requested_engines <<< "$raw_value"
+  for engine in "${requested_engines[@]}"; do
+    case "$engine" in
+      hunyuan)
+        include_hunyuan="1"
+        ;;
+      trellis)
+        include_trellis="1"
+        ;;
+      spar3d)
+        include_spar3d="1"
+        ;;
+      "")
+        ;;
+      *)
+        die "Unsupported engine in --engines: $engine"
+        ;;
+    esac
+  done
+
+  include_hunyuan="1"
+
+  if [[ "$include_hunyuan" == "1" ]]; then
+    normalized_csv="hunyuan"
+  fi
+  if [[ "$include_trellis" == "1" ]]; then
+    normalized_csv="${normalized_csv},trellis"
+  fi
+  if [[ "$include_spar3d" == "1" ]]; then
+    normalized_csv="${normalized_csv},spar3d"
+  fi
+
+  printf '%s' "$normalized_csv"
 }
 
 wait_for_apt_lock() {
@@ -349,8 +413,8 @@ prompt_value() {
 }
 
 configure_runtime_values() {
-  local current_port current_local_port current_ssh_port current_ssh_host current_install_trellis
-  local toox_port local_tunnel_port ssh_port ssh_host install_trellis
+  local current_port current_local_port current_ssh_port current_ssh_host current_install_trellis current_install_spar3d current_enabled_engines
+  local toox_port local_tunnel_port ssh_port ssh_host install_trellis install_spar3d selected_engines
   local cli_values_supplied="0"
 
   current_port="$(get_env_value "TOOX_PORT" "8011")"
@@ -358,14 +422,18 @@ configure_runtime_values() {
   current_ssh_port="$(get_env_value "TOOX_SSH_PORT" "")"
   current_ssh_host="$(get_env_value "TOOX_SSH_HOST" "")"
   current_install_trellis="$(get_env_value "TOOX_INSTALL_TRELLIS" "0")"
+  current_install_spar3d="$(get_env_value "TOOX_INSTALL_SPAR3D" "0")"
+  current_enabled_engines="$(get_env_value "TOOX_ENABLED_ENGINES" "hunyuan")"
 
   toox_port="${CLI_TOOX_PORT:-}"
   local_tunnel_port="${CLI_LOCAL_TUNNEL_PORT:-}"
   ssh_port="${CLI_SSH_PORT:-}"
   ssh_host="${CLI_SSH_HOST:-}"
   install_trellis="${CLI_INSTALL_TRELLIS:-}"
+  install_spar3d="${CLI_INSTALL_SPAR3D:-}"
+  selected_engines="${CLI_ENGINES:-}"
 
-  if [[ -n "$toox_port" || -n "$local_tunnel_port" || -n "$ssh_port" || -n "$ssh_host" || -n "$install_trellis" ]]; then
+  if [[ -n "$toox_port" || -n "$local_tunnel_port" || -n "$ssh_port" || -n "$ssh_host" || -n "$selected_engines" || -n "$install_trellis" || -n "$install_spar3d" ]]; then
     cli_values_supplied="1"
   fi
 
@@ -378,28 +446,51 @@ configure_runtime_values() {
     [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$toox_port"
     [[ -n "$ssh_port" ]] || ssh_port="$current_ssh_port"
     [[ -n "$ssh_host" ]] || ssh_host="$current_ssh_host"
-    [[ -n "$install_trellis" ]] || install_trellis="$current_install_trellis"
+    if [[ -z "$selected_engines" ]]; then
+      if [[ -n "$install_trellis" || -n "$install_spar3d" ]]; then
+        selected_engines="hunyuan"
+        [[ "$install_trellis" == "1" ]] && selected_engines="${selected_engines},trellis"
+        [[ "$install_spar3d" == "1" ]] && selected_engines="${selected_engines},spar3d"
+      else
+        selected_engines="hunyuan"
+      fi
+    fi
   elif [[ -t 0 ]]; then
     log "Configure server and tunnel values"
     [[ -n "$toox_port" ]] || toox_port="$(prompt_value "FastAPI port on the server" "$current_port")"
     [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$(prompt_value "Local port on your Mac for the SSH tunnel" "$toox_port")"
     [[ -n "$ssh_port" ]] || ssh_port="$(prompt_value "Vast.ai SSH port (leave blank if not needed now)" "$current_ssh_port")"
     [[ -n "$ssh_host" ]] || ssh_host="$(prompt_value "Vast.ai public IP or hostname (leave blank if not needed now)" "$current_ssh_host")"
-    [[ -n "$install_trellis" ]] || install_trellis="$(prompt_value "Install TRELLIS runtime too? (0/1)" "$current_install_trellis")"
+    [[ -n "$selected_engines" ]] || selected_engines="$(prompt_value "Enabled engines (hunyuan | hunyuan,trellis | hunyuan,spar3d | all)" "$current_enabled_engines")"
   else
     [[ -n "$toox_port" ]] || toox_port="$current_port"
     [[ -n "$local_tunnel_port" ]] || local_tunnel_port="$toox_port"
     [[ -n "$ssh_port" ]] || ssh_port="$current_ssh_port"
     [[ -n "$ssh_host" ]] || ssh_host="$current_ssh_host"
-    [[ -n "$install_trellis" ]] || install_trellis="$current_install_trellis"
+    [[ -n "$selected_engines" ]] || selected_engines="hunyuan"
+  fi
+
+  selected_engines="$(normalize_engines "$selected_engines")"
+  if [[ ",${selected_engines}," == *",trellis,"* ]]; then
+    install_trellis="1"
+  else
+    install_trellis="0"
+  fi
+  if [[ ",${selected_engines}," == *",spar3d,"* ]]; then
+    install_spar3d="1"
+  else
+    install_spar3d="0"
   fi
 
   set_env_value "TOOX_PORT" "$toox_port"
   set_env_value "TOOX_LOCAL_TUNNEL_PORT" "$local_tunnel_port"
   set_env_value "TOOX_SSH_PORT" "$ssh_port"
   set_env_value "TOOX_SSH_HOST" "$ssh_host"
+  set_env_value "TOOX_ENABLED_ENGINES" "$selected_engines"
   set_env_value "TOOX_INSTALL_TRELLIS" "$install_trellis"
+  set_env_value "TOOX_INSTALL_SPAR3D" "$install_spar3d"
   set_env_value "TOOX_TRELLIS_VENV" "./models/trellis-venv"
+  set_env_value "TOOX_SPAR3D_VENV" "./models/spar3d-venv"
 }
 
 sync_dependencies() {
@@ -493,6 +584,47 @@ install_trellis_runtime() {
   fi
 }
 
+install_spar3d_runtime() {
+  export PATH="$HOME/.local/bin:$PATH"
+  local install_spar3d
+  local spar3d_repo
+  local spar3d_venv
+  local spar3d_python
+
+  install_spar3d="$(get_env_value "TOOX_INSTALL_SPAR3D" "0")"
+  if [[ "$install_spar3d" != "1" ]]; then
+    log "Skipping SPAR3D runtime install"
+    return
+  fi
+
+  spar3d_repo="$PROJECT_ROOT/models/spar3d-repo"
+  spar3d_venv="$PROJECT_ROOT/models/spar3d-venv"
+  spar3d_python="$spar3d_venv/bin/python"
+
+  if [[ ! -d "$spar3d_repo/.git" ]]; then
+    log "Cloning SPAR3D repository"
+    mkdir -p "$PROJECT_ROOT/models"
+    git clone --depth 1 https://github.com/Stability-AI/stable-point-aware-3d.git "$spar3d_repo"
+  else
+    log "SPAR3D repository already present"
+  fi
+
+  if [[ ! -x "$spar3d_python" ]]; then
+    log "Creating SPAR3D venv"
+    python3 -m venv "$spar3d_venv"
+  fi
+
+  log "Installing SPAR3D runtime dependencies"
+  "$spar3d_python" -m pip install --upgrade pip setuptools==69.5.1 wheel
+  "$spar3d_python" -m pip install \
+    torch==2.5.1 torchvision==0.20.1 \
+    --index-url https://download.pytorch.org/whl/cu124
+  (
+    cd "$spar3d_repo"
+    "$spar3d_python" -m pip install -r requirements.txt
+  )
+}
+
 preload_trellis_model() {
   export PATH="$HOME/.local/bin:$PATH"
   local install_trellis
@@ -522,6 +654,49 @@ preload_trellis_model() {
     TOOX_TRELLIS_VENV="./models/trellis-venv" \
     uv run python - <<'PY'
 from backend.app.services.trellis_v1 import service
+
+service.preload_runtime()
+PY
+  )
+}
+
+preload_spar3d_model() {
+  export PATH="$HOME/.local/bin:$PATH"
+  local install_spar3d
+  local spar3d_venv
+  local spar3d_python
+  local hf_token
+
+  install_spar3d="$(get_env_value "TOOX_INSTALL_SPAR3D" "0")"
+  if [[ "$install_spar3d" != "1" ]]; then
+    return
+  fi
+
+  hf_token="${TOOX_HF_TOKEN:-${HF_TOKEN:-}}"
+  if [[ -z "$hf_token" ]]; then
+    log "Skipping SPAR3D preload because HF_TOKEN/TOOX_HF_TOKEN is not set"
+    return
+  fi
+
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    log "Skipping SPAR3D preload because nvidia-smi is not available"
+    return
+  fi
+
+  spar3d_venv="$PROJECT_ROOT/models/spar3d-venv"
+  spar3d_python="$spar3d_venv/bin/python"
+  if [[ ! -x "$spar3d_python" ]]; then
+    log "Skipping SPAR3D preload because its venv is missing"
+    return
+  fi
+
+  log "Preloading SPAR3D repository and model weights"
+  (
+    cd "$PROJECT_ROOT"
+    TOOX_SPAR3D_VENV="./models/spar3d-venv" \
+    TOOX_HF_TOKEN="$hf_token" \
+    uv run python - <<'PY'
+from backend.app.services.spar3d_v1 import service
 
 service.preload_runtime()
 PY
@@ -616,8 +791,10 @@ main() {
   sync_dependencies
   ensure_python_multipart
   install_trellis_runtime
+  install_spar3d_runtime
   preload_hunyuan_model
   preload_trellis_model
+  preload_spar3d_model
   start_uvicorn
   print_next_steps
 }

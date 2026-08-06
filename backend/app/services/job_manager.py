@@ -12,6 +12,7 @@ from backend.app.services.hunyuan_v1 import (
     HunyuanV1Service,
     service as hunyuan_v1_service,
 )
+from backend.app.services.spar3d_v1 import service as spar3d_v1_service
 from backend.app.services.trellis_v1 import service as trellis_v1_service
 
 
@@ -47,6 +48,7 @@ class HunyuanJobManager:
         self.generators = {
             "hunyuan": hunyuan_v1_service,
             "trellis": trellis_v1_service,
+            "spar3d": spar3d_v1_service,
         }
 
         self._lock = threading.Lock()

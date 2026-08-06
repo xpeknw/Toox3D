@@ -67,12 +67,23 @@ You can also pass them directly to avoid interactive prompts:
   --port 8011 \
   --ssh-port 27608 \
   --ssh-host 151.237.25.234 \
-  --install-trellis
+  --engines all
 ```
 
 If you pass any of those values, bootstrap skips the interactive questions and
 fills the rest from defaults or previously saved `.env` values. `--local-port`
 defaults to the same value as `--port`.
+
+Engine selection is now controlled with a single flag:
+
+```bash
+./bootstrap.sh --engines hunyuan
+./bootstrap.sh --engines hunyuan,trellis
+HF_TOKEN=hf_xxx ./bootstrap.sh --engines hunyuan,spar3d
+HF_TOKEN=hf_xxx ./bootstrap.sh --engines all
+```
+
+If you do not pass `--engines`, bootstrap defaults to `hunyuan` only.
 
 For fully non-interactive runs without passing any values:
 
@@ -91,13 +102,15 @@ The bootstrap script also:
 - preloads the Hunyuan repo and weights on GPU hosts
 - optionally installs TRELLIS in `models/trellis-venv`
 - optionally preloads TRELLIS weights when `TOOX_INSTALL_TRELLIS=1`
+- optionally installs SPAR3D in `models/spar3d-venv`
+- optionally preloads SPAR3D weights when `TOOX_INSTALL_SPAR3D=1` and `HF_TOKEN` is available
 - starts `uvicorn` automatically on the configured port
 - writes the API log to `logs/uvicorn.log`
 
-If you want TRELLIS available in the engine selector, bootstrap must install it:
+If you want TRELLIS available in the engine selector, include it in `--engines`:
 
 ```bash
-./bootstrap.sh --install-trellis
+./bootstrap.sh --engines hunyuan,trellis
 ```
 
 That keeps TRELLIS isolated from the main Hunyuan runtime by using a separate
@@ -110,6 +123,18 @@ prefers `ATTN_BACKEND=xformers` with `SPCONV_ALGO=native` and expects `spconv`
 inside the TRELLIS venv to avoid relying on `flash-attn` during initial
 bring-up. Depending on GPU/CUDA/driver combinations, additional native
 extensions from the upstream TRELLIS setup may still be required later.
+
+If you want SPAR3D available in the engine selector, include it in `--engines`
+and provide a Hugging Face token:
+
+```bash
+HF_TOKEN=hf_xxx ./bootstrap.sh --engines hunyuan,spar3d
+```
+
+SPAR3D is an official Stability AI gated model and requires that you have
+already accepted the model terms on Hugging Face and that a valid read token is
+available in `HF_TOKEN` or `TOOX_HF_TOKEN`. Its runtime is isolated in
+`models/spar3d-venv`.
 
 ## Local development
 

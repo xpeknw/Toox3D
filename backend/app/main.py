@@ -72,7 +72,25 @@ ENGINES = {
     "trellis": {
         "description": "Microsoft TRELLIS image-to-3D pipeline. Optional heavier engine.",
     },
+    "spar3d": {
+        "description": "Stability AI SPAR3D. Gated single-image reconstruction engine with stronger backside reasoning.",
+    },
 }
+
+
+def enabled_engines() -> dict[str, dict[str, str]]:
+    raw_value = os.environ.get("TOOX_ENABLED_ENGINES", "hunyuan")
+    normalized = {
+        item.strip().lower()
+        for item in raw_value.split(",")
+        if item.strip()
+    }
+    normalized.add("hunyuan")
+    return {
+        key: value
+        for key, value in ENGINES.items()
+        if key in normalized
+    }
 
 
 def resolve_generation_params(
@@ -89,10 +107,14 @@ def resolve_generation_params(
 ) -> dict:
     normalized_preset = preset.strip().lower()
     normalized_engine = engine.strip().lower()
-    if normalized_engine not in ENGINES:
+    current_engines = enabled_engines()
+    if normalized_engine not in current_engines:
         raise HTTPException(
             status_code=400,
-            detail=("engine must be one of: " + ", ".join(sorted(ENGINES))),
+            detail=(
+                "engine must be one of: "
+                + ", ".join(sorted(current_engines))
+            ),
         )
 
     if normalized_preset not in GENERATION_PRESETS:
@@ -158,7 +180,7 @@ def health() -> dict[str, str]:
 @app.get("/v2/presets")
 def list_v2_presets() -> dict[str, dict]:
     return {
-        "engines": ENGINES,
+        "engines": enabled_engines(),
         "presets": GENERATION_PRESETS,
         "print_profiles": PRINT_PROFILES,
     }
