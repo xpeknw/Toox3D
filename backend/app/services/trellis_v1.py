@@ -262,5 +262,10 @@ class TrellisV1Service(HunyuanV1Service):
 
         return time.time()
 
+    def _now(self) -> str:
+        import time
+
+        return time.strftime("%Y-%m-%d %H:%M:%S")
+
 
 service = TrellisV1Service()
