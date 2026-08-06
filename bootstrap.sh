@@ -629,10 +629,18 @@ install_spar3d_runtime() {
     --index-url https://download.pytorch.org/whl/cu124
   (
     cd "$spar3d_repo"
-    "$spar3d_python" -m pip install --no-build-isolation --no-use-pep517 \
-      git+https://github.com/openai/CLIP.git
-    "$spar3d_python" -m pip install --no-build-isolation --no-use-pep517 \
-      git+https://github.com/SunzeY/AlphaCLIP.git
+    clip_tmp_dir="$(mktemp -d /tmp/toox3d-clip-XXXXXX)"
+    alphaclip_tmp_dir="$(mktemp -d /tmp/toox3d-alphaclip-XXXXXX)"
+    git clone --depth 1 https://github.com/openai/CLIP.git "$clip_tmp_dir"
+    git clone --depth 1 https://github.com/SunzeY/AlphaCLIP.git "$alphaclip_tmp_dir"
+    (
+      cd "$clip_tmp_dir"
+      "$spar3d_python" setup.py install
+    )
+    (
+      cd "$alphaclip_tmp_dir"
+      "$spar3d_python" setup.py install
+    )
     grep -v 'github.com/openai/CLIP.git\|github.com/SunzeY/AlphaCLIP.git' requirements.txt > /tmp/toox3d-spar3d-requirements.txt
     "$spar3d_python" -m pip install --no-build-isolation -r /tmp/toox3d-spar3d-requirements.txt
   )
